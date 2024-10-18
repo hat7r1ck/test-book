@@ -1,33 +1,25 @@
 import pandas as pd
 import re
-from urllib.parse import unquote, urlparse, parse_qs
+from urllib.parse import unquote, urlparse
+import numpy as np
 
 def extract_search_terms_and_engine(url):
-    """Extracts search terms and search engine from a URL."""
-    try:
-        decoded_url = unquote(url)
-        parsed_url = urlparse(decoded_url)
-        query_params = parse_qs(parsed_url.query)
+    decoded_url = unquote(url)
 
-        # List of possible query parameter names for search terms
-        search_param_names = ['q', 'wd', 'text', 'search_query', 'query']
+    # Ensure the URL has a scheme
+    if not re.match(r'^[a-zA-Z]+://', decoded_url):
+        decoded_url = 'http://' + decoded_url
 
-        search_term = None
-        for param in search_param_names:
-            if param in query_params:
-                search_term = query_params[param][0]
-                break
+    parsed_url = urlparse(decoded_url)
+    query_string = parsed_url.query
 
-        if search_term:
-            search_term = unquote(search_term).replace('+', ' ').strip().lower()
-
-        # Extract the domain (search engine) from the URL's netloc
-        domain = parsed_url.netloc.split(':')[0]  # Remove port if present
-        search_engine = domain if domain else 'unknown'
-
+    # Use corrected regex to extract search terms from the query string
+    match = re.search(r"[&?](q|wd|text|search_query|query)=(.+?)(&|$)", query_string)
+    if match:
+        search_term = unquote(match.group(2)).replace("+", " ").strip().lower()
+        search_engine = parsed_url.netloc.split(':')[0]  # Remove port if present
         return search_term, search_engine
-    except Exception as e:
-        # Handle any exceptions that may occur and return None values
+    else:
         return None, None
 
 # Load CSV file
@@ -51,10 +43,8 @@ if missing_columns:
 # Drop rows with missing URLs or User IDs
 web_traffic_data.dropna(subset=['udm.target.url', 'udm.principal.user.userid'], inplace=True)
 
-# Apply the function to extract search terms and search engine
+# Extract search terms and search engine using the defined function
 results = web_traffic_data['udm.target.url'].apply(extract_search_terms_and_engine)
-
-# Now assign the results to separate columns
 web_traffic_data['search_term'], web_traffic_data['search_engine'] = zip(*results)
 
 # Filter rows where search terms were found
@@ -72,11 +62,35 @@ except Exception as e:
     print(f"Error converting 'timestamp' column to datetime: {e}")
     exit()
 
+# Sort the data by user and timestamp
+web_traffic_data_with_search_terms.sort_values(by=['udm.principal.user.userid', 'timestamp'], inplace=True)
+
+# Define a function to assign session IDs based on time difference
+def assign_session_ids(df, time_threshold='30s'):
+    df['time_diff'] = df['timestamp'].diff()
+    df['new_session'] = (df['time_diff'] > pd.Timedelta(time_threshold)) | (df['time_diff'].isnull())
+    df['session_id'] = df['new_session'].cumsum()
+    df.drop(columns=['time_diff', 'new_session'], inplace=True)
+    return df
+
+# Apply session IDs per user
+web_traffic_data_with_search_terms = web_traffic_data_with_search_terms.groupby('udm.principal.user.userid', group_keys=False).apply(assign_session_ids)
+
+# Now, within each session, keep only the longest search term
+def keep_longest_search_term(df):
+    # Within each session, sort by search_term length descending
+    df['search_term_length'] = df['search_term'].str.len()
+    df.sort_values(by=['search_term_length'], ascending=False, inplace=True)
+    # Keep the first occurrence (longest search term)
+    df = df.drop_duplicates(subset=['session_id'], keep='first')
+    df.drop(columns=['search_term_length'], inplace=True)
+    return df
+
+processed_data = web_traffic_data_with_search_terms.groupby(['udm.principal.user.userid', 'session_id'], group_keys=False).apply(keep_longest_search_term)
+
 # Group by user, timestamp, search term, and search engine and count occurrences
 combined_output = (
-    web_traffic_data_with_search_terms.groupby(
-        ['udm.principal.user.userid', 'timestamp', 'search_term', 'search_engine']
-    )
+    processed_data.groupby(['udm.principal.user.userid', 'timestamp', 'search_term', 'search_engine'])
     .size()
     .reset_index(name='count')
 )
