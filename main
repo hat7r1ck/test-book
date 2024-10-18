@@ -1,27 +1,34 @@
 import pandas as pd
-from urllib.parse import unquote, urlparse
 import re
+from urllib.parse import unquote, urlparse, parse_qs
 
-# Function to extract search terms and search engine from a URL
-def extract_search_term_and_engine(url):
-    if pd.isna(url):
-        return None, None
-    
-    decoded_url = unquote(url)
-    parsed_url = urlparse(decoded_url)
-    query_string = parsed_url.query
-    
-    # Extract the domain (search engine) from the netloc (host)
-    search_engine = parsed_url.netloc
-    
-    # Use regex to extract search terms from the query string
-    match = re.search(r'([&?])(q|wd|text|search_query|query)=([^&]*)', query_string)
-    
-    if match:
-        search_term = unquote(match.group(3)).replace('+', ' ')
+def extract_search_terms_and_engine(url):
+    """Extracts search terms and search engine from a URL."""
+    try:
+        decoded_url = unquote(url)
+        parsed_url = urlparse(decoded_url)
+        query_params = parse_qs(parsed_url.query)
+
+        # List of possible query parameter names for search terms
+        search_param_names = ['q', 'wd', 'text', 'search_query', 'query']
+
+        search_term = None
+        for param in search_param_names:
+            if param in query_params:
+                search_term = query_params[param][0]
+                break
+
+        if search_term:
+            search_term = unquote(search_term).replace('+', ' ').strip().lower()
+
+        # Extract the domain (search engine) from the URL's netloc
+        domain = parsed_url.netloc.split(':')[0]  # Remove port if present
+        search_engine = domain if domain else 'unknown'
+
         return search_term, search_engine
-    else:
-        return None, search_engine
+    except Exception as e:
+        # Handle any exceptions that may occur and return None values
+        return None, None
 
 # Load CSV file
 try:
@@ -30,39 +37,48 @@ try:
 except FileNotFoundError:
     print(f"Error: File not found at {csv_file_path}")
     exit()
+except Exception as e:
+    print(f"Error: {e}")
+    exit()
+
+# Check if required columns are in the DataFrame
+required_columns = ['udm.target.url', 'udm.principal.user.userid', 'timestamp']
+missing_columns = [col for col in required_columns if col not in web_traffic_data.columns]
+if missing_columns:
+    print(f"Error: The following required columns are missing from the dataset: {', '.join(missing_columns)}")
+    exit()
 
 # Drop rows with missing URLs or User IDs
 web_traffic_data.dropna(subset=['udm.target.url', 'udm.principal.user.userid'], inplace=True)
 
 # Apply the function to extract search terms and search engine
-results = web_traffic_data['udm.target.url'].apply(lambda url: extract_search_term_and_engine(url))
-web_traffic_data[['search_term', 'search_engine']] = pd.DataFrame(results.tolist(), index=web_traffic_data.index)
+results = web_traffic_data['udm.target.url'].apply(extract_search_terms_and_engine)
+
+# Now assign the results to separate columns
+web_traffic_data['search_term'], web_traffic_data['search_engine'] = zip(*results)
 
 # Filter rows where search terms were found
-web_traffic_data_with_search_terms = web_traffic_data[web_traffic_data['search_term'].notna()].copy()
+web_traffic_data_with_search_terms = web_traffic_data[web_traffic_data['search_term'].notnull()].copy()
 
-# Normalize search terms (strip spaces and convert to lowercase)
-web_traffic_data_with_search_terms['search_term'] = web_traffic_data_with_search_terms['search_term'].str.strip().str.lower()
-
-# Convert the 'timestamp' column to datetime for proper sorting and include both date and time
-try:
-    web_traffic_data_with_search_terms['timestamp'] = pd.to_datetime(web_traffic_data_with_search_terms['timestamp'], errors='coerce')
-except KeyError:
-    print("Error: 'timestamp' column not found in the dataset.")
+if web_traffic_data_with_search_terms.empty:
+    print("No search terms were found in the data.")
     exit()
 
-# Drop rows with invalid timestamps
-web_traffic_data_with_search_terms.dropna(subset=['timestamp'], inplace=True)
-
-# Extract hour from timestamp for easier grouping
-web_traffic_data_with_search_terms['hour'] = web_traffic_data_with_search_terms['timestamp'].dt.hour
+# Convert the 'timestamp' column to datetime for proper sorting
+try:
+    web_traffic_data_with_search_terms['timestamp'] = pd.to_datetime(
+        web_traffic_data_with_search_terms['timestamp'])
+except Exception as e:
+    print(f"Error converting 'timestamp' column to datetime: {e}")
+    exit()
 
 # Group by user, timestamp, search term, and search engine and count occurrences
 combined_output = (
-    web_traffic_data_with_search_terms.groupby(['udm.principal.user.userid', 'timestamp', 'search_term', 'search_engine'])
+    web_traffic_data_with_search_terms.groupby(
+        ['udm.principal.user.userid', 'timestamp', 'search_term', 'search_engine']
+    )
     .size()
-    .to_frame(name='count')
-    .reset_index()
+    .reset_index(name='count')
 )
 
 # Sort by user and timestamp for clarity
@@ -70,6 +86,3 @@ combined_output.sort_values(by=['udm.principal.user.userid', 'timestamp'], inpla
 
 # Display the final sorted results
 print(combined_output)
-
-# Optionally, export the results to CSV if needed
-combined_output.to_csv('sorted_search_results.csv', index=False)
