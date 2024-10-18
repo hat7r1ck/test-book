@@ -1,43 +1,77 @@
 import pandas as pd
-from urllib.parse import urlparse, parse_qs, unquote_plus
 import re
+from urllib.parse import urlparse, parse_qs, unquote_plus
+import logging
+
+# Set up logging to a file for error messages
+logging.basicConfig(filename='url_parsing_errors.log', level=logging.ERROR, format='%(message)s')
 
 def extract_search_terms_and_engine(url):
     try:
-        # Ensure the URL has a scheme
+        url = url.strip()
+        if not url:
+            return None, None
+
+        # Ensure the URL has a scheme (http:// or https://)
         if not re.match(r'^[a-zA-Z]+://', url):
             url = 'http://' + url
 
-        # Parse the URL
         parsed_url = urlparse(url)
-        query_params = parse_qs(parsed_url.query, keep_blank_values=True)
+        if not parsed_url.netloc:
+            return None, None
 
-        # List of possible query parameter names for search terms
-        search_param_names = [
-            'q', 'query', 'p', 'wd', 'text', 'search_query', 'keyword', 'k', 'search', 'term', 'searchtext', 'key', 'keywords'
-        ]
-
+        # Initialize search_term
         search_term = None
+
+        # First, try to extract from query parameters
+        query_params = parse_qs(parsed_url.query, keep_blank_values=True)
+        search_param_names = [
+            'q', 'query', 'p', 'wd', 'text', 'search_query', 'keyword', 'k',
+            'search', 'term', 'searchtext', 'key', 'keywords'
+        ]
         for param in search_param_names:
             if param in query_params and query_params[param]:
-                # Get the first value for this parameter
                 search_term_raw = query_params[param][0]
-                # Decode the search term using unquote_plus
                 search_term = unquote_plus(search_term_raw)
-                # Decode using UTF-8 to handle non-ASCII characters
-                search_term = search_term.encode('latin1').decode('utf-8', errors='replace')
                 search_term = search_term.strip().lower()
                 break
 
-        # Extract the domain (search engine) from the URL's netloc
+        # If not found, try to extract from the path
+        if not search_term:
+            path = parsed_url.path
+            # For paths like '/search/keyword'
+            path_parts = path.strip('/').split('/')
+            possible_terms = ['search', 'keyword', 'query']
+            for i, part in enumerate(path_parts):
+                if part.lower() in possible_terms and i + 1 < len(path_parts):
+                    search_term = unquote_plus(path_parts[i + 1])
+                    search_term = search_term.strip().lower()
+                    break
+
         domain = parsed_url.netloc.split(':')[0]  # Remove port if present
         search_engine = domain if domain else 'unknown'
 
         return search_term, search_engine
     except Exception as e:
         # Log the error and URL for debugging
-        print(f"Error parsing URL: {url} - {e}")
+        logging.error(f"Error parsing URL: {url} - {e}")
         return None, None
+
+def assign_session_ids(df, time_threshold='30s'):
+    df['time_diff'] = df['timestamp'].diff()
+    df['new_session'] = (df['time_diff'] > pd.Timedelta(time_threshold)) | (df['time_diff'].isnull())
+    df['session_id'] = df['new_session'].cumsum()
+    df.drop(columns=['time_diff', 'new_session'], inplace=True)
+    return df
+
+def keep_longest_search_term(df):
+    # Within each session, sort by search_term length descending
+    df['search_term_length'] = df['search_term'].str.len()
+    df.sort_values(by=['search_term_length'], ascending=False, inplace=True)
+    # Keep the first occurrence (longest search term)
+    df = df.drop_duplicates(subset=['session_id'], keep='first')
+    df.drop(columns=['search_term_length'], inplace=True)
+    return df
 
 # Load CSV file
 try:
@@ -47,7 +81,7 @@ except FileNotFoundError:
     print(f"Error: File not found at {csv_file_path}")
     exit()
 except Exception as e:
-    print(f"Error: {e}")
+    print(f"Error reading CSV file: {e}")
     exit()
 
 # Check if required columns are in the DataFrame
@@ -67,8 +101,18 @@ web_traffic_data['search_term'], web_traffic_data['search_engine'] = zip(*result
 # Check how many rows have search terms
 total_rows = len(web_traffic_data)
 rows_with_search_terms = web_traffic_data['search_term'].notnull().sum()
-print(f"Total rows: {total_rows}")
-print(f"Rows with search terms: {rows_with_search_terms}")
+print(f"Total rows processed: {total_rows}")
+print(f"Total rows with search terms extracted: {rows_with_search_terms}")
+
+# Count the number of parsing errors
+try:
+    with open('url_parsing_errors.log', 'r') as log_file:
+        error_lines = log_file.readlines()
+        num_errors = len(error_lines)
+except FileNotFoundError:
+    num_errors = 0
+
+print(f"Total URLs failed to parse: {num_errors}")
 
 # Proceed only if there are search terms found
 if rows_with_search_terms == 0:
@@ -89,11 +133,17 @@ except Exception as e:
 # Sort the data by user and timestamp
 web_traffic_data_with_search_terms.sort_values(by=['udm.principal.user.userid', 'timestamp'], inplace=True)
 
-# (Optional) If you still see incremental search terms, you can apply the session-based filtering as before.
+# Assign session IDs per user
+web_traffic_data_with_search_terms = web_traffic_data_with_search_terms.groupby(
+    'udm.principal.user.userid', group_keys=False).apply(assign_session_ids)
+
+# Now, within each session, keep only the longest search term
+processed_data = web_traffic_data_with_search_terms.groupby(
+    ['udm.principal.user.userid', 'session_id'], group_keys=False).apply(keep_longest_search_term)
 
 # Group by user, timestamp, search term, and search engine and count occurrences
 combined_output = (
-    web_traffic_data_with_search_terms.groupby(
+    processed_data.groupby(
         ['udm.principal.user.userid', 'timestamp', 'search_term', 'search_engine']
     )
     .size()
