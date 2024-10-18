@@ -62,106 +62,110 @@ print(f"Total unique user IDs in data: {len(unique_user_ids)}")
 user_exists = alert_event['user_id'] in unique_user_ids
 print(f"Is the alert event user ID in data: {user_exists}")
 
-if not user_exists:
-    print(f"No historical data found for user ID '{alert_event['user_id']}'.")
-else:
-    # Filter the DataFrame to include only the user's data
-    user_history = df[df['user_id'] == alert_event['user_id']]
-    print(f"Total records for user '{alert_event['user_id']}': {len(user_history)}")
+# Filter the DataFrame to include only the user's data
+user_history = df[df['user_id'] == alert_event['user_id']]
+print(f"Total records for user '{alert_event['user_id']}': {len(user_history)}")
 
-    # Proceed with the analysis
-    # Total number of events in user history
-    total_events = len(user_history)
+# Total number of events in user history
+total_events = len(user_history)
 
-    # Prepare a dictionary to store detailed findings
-    detailed_findings = {}
+# Prepare a dictionary to store detailed findings
+detailed_findings = {}
 
-    # Source IP Address Analysis
-    source_ip_counts = user_history['source_ip'].value_counts()
-    source_ip_usage_count = source_ip_counts.get(alert_event['source_ip'], 0)
-    source_ip_usage_percentage = (source_ip_usage_count / total_events) * 100 if total_events > 0 else 0
-    ip_used_before = source_ip_usage_count > 0
-    detailed_findings['Source IP Address'] = {
-        'used_before': ip_used_before,
-        'usage_count': source_ip_usage_count,
-        'usage_percentage': source_ip_usage_percentage
-    }
+# Define a function to calculate usage counts and percentages
+def calculate_usage_count_and_percentage(user_history_field, alert_value):
+    if total_events > 0:
+        counts = user_history_field.value_counts()
+        usage_count = counts.get(alert_value, 0)
+        usage_percentage = (usage_count / total_events) * 100
+        used_before = usage_count > 0
+    else:
+        usage_count = 0
+        usage_percentage = 0.0
+        used_before = False
+    return used_before, usage_count, usage_percentage
 
-    # Device ID Analysis
-    device_id_counts = user_history['device_id'].value_counts()
-    device_id_usage_count = device_id_counts.get(alert_event['device_id'], 0)
-    device_id_usage_percentage = (device_id_usage_count / total_events) * 100 if total_events > 0 else 0
-    device_used_before = device_id_usage_count > 0
-    detailed_findings['Device ID'] = {
-        'used_before': device_used_before,
-        'usage_count': device_id_usage_count,
-        'usage_percentage': device_id_usage_percentage
-    }
+# Source IP Address Analysis
+ip_used_before, source_ip_usage_count, source_ip_usage_percentage = calculate_usage_count_and_percentage(user_history['source_ip'], alert_event['source_ip'])
+detailed_findings['Source IP Address'] = {
+    'used_before': ip_used_before,
+    'usage_count': source_ip_usage_count,
+    'usage_percentage': source_ip_usage_percentage
+}
 
-    # User Agent Analysis
-    user_agent_counts = user_history['user_agent'].value_counts()
-    user_agent_usage_count = user_agent_counts.get(alert_event['user_agent'], 0)
-    user_agent_usage_percentage = (user_agent_usage_count / total_events) * 100 if total_events > 0 else 0
-    user_agent_used_before = user_agent_usage_count > 0
-    detailed_findings['User Agent'] = {
-        'used_before': user_agent_used_before,
-        'usage_count': user_agent_usage_count,
-        'usage_percentage': user_agent_usage_percentage
-    }
+# Device ID Analysis
+device_used_before, device_id_usage_count, device_id_usage_percentage = calculate_usage_count_and_percentage(user_history['device_id'], alert_event['device_id'])
+detailed_findings['Device ID'] = {
+    'used_before': device_used_before,
+    'usage_count': device_id_usage_count,
+    'usage_percentage': device_id_usage_percentage
+}
 
-    # Time of Day Analysis
-    alert_hour = alert_event['timestamp'].hour
+# User Agent Analysis
+user_agent_used_before, user_agent_usage_count, user_agent_usage_percentage = calculate_usage_count_and_percentage(user_history['user_agent'], alert_event['user_agent'])
+detailed_findings['User Agent'] = {
+    'used_before': user_agent_used_before,
+    'usage_count': user_agent_usage_count,
+    'usage_percentage': user_agent_usage_percentage
+}
+
+# Time of Day Analysis
+alert_hour = alert_event['timestamp'].hour
+if total_events > 0:
     user_history['hour'] = user_history['timestamp'].dt.hour
-    hour_counts = user_history['hour'].value_counts()
-    hour_usage_count = hour_counts.get(alert_hour, 0)
-    hour_usage_percentage = (hour_usage_count / total_events) * 100 if total_events > 0 else 0
-    hour_used_before = hour_usage_count > 0
-    detailed_findings['Login Hour'] = {
-        'used_before': hour_used_before,
-        'usage_count': hour_usage_count,
-        'usage_percentage': hour_usage_percentage
-    }
+    hour_used_before, hour_usage_count, hour_usage_percentage = calculate_usage_count_and_percentage(user_history['hour'], alert_hour)
+else:
+    hour_used_before = False
+    hour_usage_count = 0
+    hour_usage_percentage = 0.0
+detailed_findings['Login Hour'] = {
+    'used_before': hour_used_before,
+    'usage_count': hour_usage_count,
+    'usage_percentage': hour_usage_percentage
+}
 
-    # Authentication Type Analysis
-    auth_type_counts = user_history['authentication_type'].value_counts()
-    auth_type_usage_count = auth_type_counts.get(alert_event['authentication_type'], 0)
-    auth_type_usage_percentage = (auth_type_usage_count / total_events) * 100 if total_events > 0 else 0
-    auth_type_used_before = auth_type_usage_count > 0
-    detailed_findings['Authentication Type'] = {
-        'used_before': auth_type_used_before,
-        'usage_count': auth_type_usage_count,
-        'usage_percentage': auth_type_usage_percentage
-    }
+# Authentication Type Analysis
+auth_type_used_before, auth_type_usage_count, auth_type_usage_percentage = calculate_usage_count_and_percentage(user_history['authentication_type'], alert_event['authentication_type'])
+detailed_findings['Authentication Type'] = {
+    'used_before': auth_type_used_before,
+    'usage_count': auth_type_usage_count,
+    'usage_percentage': auth_type_usage_percentage
+}
 
-    # Location Analysis (Country and State)
+# Location Analysis (Country and State)
+if total_events > 0:
     location_matches = user_history[
         (user_history['country'] == alert_event['country']) &
         (user_history['state'] == alert_event['state'])
     ]
     location_usage_count = len(location_matches)
-    location_usage_percentage = (location_usage_count / total_events) * 100 if total_events > 0 else 0
+    location_usage_percentage = (location_usage_count / total_events) * 100
     location_used_before = location_usage_count > 0
-    detailed_findings['Location'] = {
-        'used_before': location_used_before,
-        'usage_count': location_usage_count,
-        'usage_percentage': location_usage_percentage
-    }
+else:
+    location_used_before = False
+    location_usage_count = 0
+    location_usage_percentage = 0.0
+detailed_findings['Location'] = {
+    'used_before': location_used_before,
+    'usage_count': location_usage_count,
+    'usage_percentage': location_usage_percentage
+}
 
-    # Summarize and Output the Detailed Findings
-    print("\nDetailed Analysis of Alert Event Compared to User's Historical Data:\n")
-    for characteristic, data in detailed_findings.items():
-        status = 'Yes' if data['used_before'] else 'No'
-        usage_info = f"Used {data['usage_count']} times ({data['usage_percentage']:.2f}% of logins)"
-        print(f"{characteristic}:\n - Seen Before: {status}\n - {usage_info}\n")
+# Summarize and Output the Detailed Findings
+print("\nDetailed Analysis of Alert Event Compared to User's Historical Data:\n")
+for characteristic, data in detailed_findings.items():
+    status = 'Yes' if data['used_before'] else 'No'
+    usage_info = f"Used {data['usage_count']} times ({data['usage_percentage']:.2f}% of logins)"
+    print(f"{characteristic}:\n - Seen Before: {status}\n - {usage_info}\n")
 
-    # Determine the level of deviation
-    unseen_characteristics = sum(not data['used_before'] for data in detailed_findings.values())
+# Determine the level of deviation
+unseen_characteristics = sum(not data['used_before'] for data in detailed_findings.values())
 
-    if unseen_characteristics == 0:
-        conclusion = "The alert event matches the user's historical behavior."
-    elif unseen_characteristics <= 2:
-        conclusion = "The alert event has some new characteristics but is largely consistent with past behavior."
-    else:
-        conclusion = "The alert event significantly deviates from the user's historical behavior and may be suspicious."
+if unseen_characteristics == 0:
+    conclusion = "The alert event matches the user's historical behavior."
+elif unseen_characteristics <= 2:
+    conclusion = "The alert event has some new characteristics but is largely consistent with past behavior."
+else:
+    conclusion = "The alert event significantly deviates from the user's historical behavior and may be suspicious."
 
-    print(f"Conclusion: {conclusion}")
+print(f"Conclusion: {conclusion}")
