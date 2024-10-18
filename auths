@@ -1,0 +1,110 @@
+import pandas as pd
+
+# Load your SIEM logs into a DataFrame
+csv_file_path = input("Please enter the path to the CSV file: ")
+df = pd.read_csv(csv_file_path)
+
+# Ensure the 'timestamp' column is in datetime format
+df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+df.dropna(subset=['timestamp'], inplace=True)
+
+# Map SIEM columns to analysis fields
+df.rename(columns={
+    'udm.principal.ip': 'source_ip',
+    'udm.network.http.user_agent': 'user_agent',
+    'udm.metadata.product_name': 'authentication_type',
+    'udm.security_result.action': 'authentication_result',
+    'udm.principal.asset.hostname': 'user_id',  # Assuming hostname can identify the user
+    'udm.principal.asset_id': 'device_id',
+    'udm.principal.ip_geo_artifact.location.country_or_region': 'country',
+    'udm.principal.ip_geo_artifact.location.state': 'state',
+    # Add other mappings as necessary
+}, inplace=True)
+
+# Handle missing data
+df.dropna(subset=['user_id'], inplace=True)
+df['authentication_result'].fillna('unknown', inplace=True)
+df['source_ip'].fillna('unknown', inplace=True)
+
+# Extract the alert event
+# Replace the example values with the actual alert event details
+alert_event = {
+    'timestamp': pd.to_datetime('2023-10-12 14:30:00'),
+    'user_id': 'user123',  # Use the appropriate user identifier
+    'source_ip': '203.0.113.45',
+    'device_id': 'device456',
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    'authentication_type': 'VPN Login',
+    'authentication_result': 'success',
+    'country': 'United States',
+    'state': 'California',
+    # Include other relevant fields as needed
+}
+
+alert_df = pd.DataFrame([alert_event])
+
+# Filter the DataFrame to include only the user's data
+user_history = df[df['user_id'] == alert_event['user_id']]
+
+# Check if historical data is available
+if user_history.empty:
+    print("No historical data found for this user.")
+    # Decide whether to proceed or not
+else:
+    # Proceed with comparing event characteristics
+
+    # Compare Source IP Address
+    ip_used_before = alert_event['source_ip'] in user_history['source_ip'].dropna().unique()
+
+    # Compare Device ID
+    if 'device_id' in df.columns and 'device_id' in alert_event:
+        device_used_before = alert_event['device_id'] in user_history['device_id'].dropna().unique()
+    else:
+        device_used_before = None  # Not available
+
+    # Compare User Agent
+    user_agent_used_before = alert_event['user_agent'] in user_history['user_agent'].dropna().unique()
+
+    # Compare Time of Day
+    alert_hour = alert_event['timestamp'].hour
+    user_history['hour'] = user_history['timestamp'].dt.hour
+    hour_used_before = alert_hour in user_history['hour'].unique()
+
+    # Compare Authentication Type
+    auth_type_used_before = alert_event['authentication_type'] in user_history['authentication_type'].dropna().unique()
+
+    # Compare Location
+    location_used_before = not user_history[
+        (user_history['country'] == alert_event['country']) &
+        (user_history['state'] == alert_event['state'])
+    ].empty
+
+    # Summarize Findings
+    findings = {
+        'Source IP Used Before': ip_used_before,
+        'Device ID Used Before': device_used_before,
+        'User Agent Used Before': user_agent_used_before,
+        'Login Hour Used Before': hour_used_before,
+        'Authentication Type Used Before': auth_type_used_before,
+        'Location Used Before': location_used_before,
+    }
+
+    print("Analysis of Alert Event Compared to User's Historical Data:\n")
+    for key, value in findings.items():
+        if value is not None:
+            status = 'Yes' if value else 'No'
+            print(f"{key}: {status}")
+        else:
+            print(f"{key}: Data Not Available")
+
+    # Determine the level of deviation
+    unseen_characteristics = sum(not value for value in findings.values() if value is not None)
+
+    if unseen_characteristics == 0:
+        conclusion = "The alert event matches the user's historical behavior."
+    elif unseen_characteristics <= 2:
+        conclusion = "The alert event has some new characteristics but is largely consistent with past behavior."
+    else:
+        conclusion = "The alert event significantly deviates from the user's historical behavior and may be suspicious."
+
+    print(f"\nConclusion: {conclusion}")
