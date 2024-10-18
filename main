@@ -1,25 +1,42 @@
 import pandas as pd
+from urllib.parse import urlparse, parse_qs, unquote_plus
 import re
-from urllib.parse import unquote, urlparse
-import numpy as np
 
 def extract_search_terms_and_engine(url):
-    decoded_url = unquote(url)
+    try:
+        # Ensure the URL has a scheme
+        if not re.match(r'^[a-zA-Z]+://', url):
+            url = 'http://' + url
 
-    # Ensure the URL has a scheme
-    if not re.match(r'^[a-zA-Z]+://', decoded_url):
-        decoded_url = 'http://' + decoded_url
+        # Parse the URL
+        parsed_url = urlparse(url)
+        query_params = parse_qs(parsed_url.query, keep_blank_values=True)
 
-    parsed_url = urlparse(decoded_url)
-    query_string = parsed_url.query
+        # List of possible query parameter names for search terms
+        search_param_names = [
+            'q', 'query', 'p', 'wd', 'text', 'search_query', 'keyword', 'k', 'search', 'term', 'searchtext', 'key', 'keywords'
+        ]
 
-    # Use corrected regex to extract search terms from the query string
-    match = re.search(r"[&?](q|wd|text|search_query|query)=(.+?)(&|$)", query_string)
-    if match:
-        search_term = unquote(match.group(2)).replace("+", " ").strip().lower()
-        search_engine = parsed_url.netloc.split(':')[0]  # Remove port if present
+        search_term = None
+        for param in search_param_names:
+            if param in query_params and query_params[param]:
+                # Get the first value for this parameter
+                search_term_raw = query_params[param][0]
+                # Decode the search term using unquote_plus
+                search_term = unquote_plus(search_term_raw)
+                # Decode using UTF-8 to handle non-ASCII characters
+                search_term = search_term.encode('latin1').decode('utf-8', errors='replace')
+                search_term = search_term.strip().lower()
+                break
+
+        # Extract the domain (search engine) from the URL's netloc
+        domain = parsed_url.netloc.split(':')[0]  # Remove port if present
+        search_engine = domain if domain else 'unknown'
+
         return search_term, search_engine
-    else:
+    except Exception as e:
+        # Log the error and URL for debugging
+        print(f"Error parsing URL: {url} - {e}")
         return None, None
 
 # Load CSV file
@@ -43,16 +60,23 @@ if missing_columns:
 # Drop rows with missing URLs or User IDs
 web_traffic_data.dropna(subset=['udm.target.url', 'udm.principal.user.userid'], inplace=True)
 
-# Extract search terms and search engine using the defined function
+# Apply the function to extract search terms and search engine
 results = web_traffic_data['udm.target.url'].apply(extract_search_terms_and_engine)
 web_traffic_data['search_term'], web_traffic_data['search_engine'] = zip(*results)
 
-# Filter rows where search terms were found
-web_traffic_data_with_search_terms = web_traffic_data[web_traffic_data['search_term'].notnull()].copy()
+# Check how many rows have search terms
+total_rows = len(web_traffic_data)
+rows_with_search_terms = web_traffic_data['search_term'].notnull().sum()
+print(f"Total rows: {total_rows}")
+print(f"Rows with search terms: {rows_with_search_terms}")
 
-if web_traffic_data_with_search_terms.empty:
+# Proceed only if there are search terms found
+if rows_with_search_terms == 0:
     print("No search terms were found in the data.")
     exit()
+
+# Filter rows where search terms were found
+web_traffic_data_with_search_terms = web_traffic_data[web_traffic_data['search_term'].notnull()].copy()
 
 # Convert the 'timestamp' column to datetime for proper sorting
 try:
@@ -65,32 +89,13 @@ except Exception as e:
 # Sort the data by user and timestamp
 web_traffic_data_with_search_terms.sort_values(by=['udm.principal.user.userid', 'timestamp'], inplace=True)
 
-# Define a function to assign session IDs based on time difference
-def assign_session_ids(df, time_threshold='30s'):
-    df['time_diff'] = df['timestamp'].diff()
-    df['new_session'] = (df['time_diff'] > pd.Timedelta(time_threshold)) | (df['time_diff'].isnull())
-    df['session_id'] = df['new_session'].cumsum()
-    df.drop(columns=['time_diff', 'new_session'], inplace=True)
-    return df
-
-# Apply session IDs per user
-web_traffic_data_with_search_terms = web_traffic_data_with_search_terms.groupby('udm.principal.user.userid', group_keys=False).apply(assign_session_ids)
-
-# Now, within each session, keep only the longest search term
-def keep_longest_search_term(df):
-    # Within each session, sort by search_term length descending
-    df['search_term_length'] = df['search_term'].str.len()
-    df.sort_values(by=['search_term_length'], ascending=False, inplace=True)
-    # Keep the first occurrence (longest search term)
-    df = df.drop_duplicates(subset=['session_id'], keep='first')
-    df.drop(columns=['search_term_length'], inplace=True)
-    return df
-
-processed_data = web_traffic_data_with_search_terms.groupby(['udm.principal.user.userid', 'session_id'], group_keys=False).apply(keep_longest_search_term)
+# (Optional) If you still see incremental search terms, you can apply the session-based filtering as before.
 
 # Group by user, timestamp, search term, and search engine and count occurrences
 combined_output = (
-    processed_data.groupby(['udm.principal.user.userid', 'timestamp', 'search_term', 'search_engine'])
+    web_traffic_data_with_search_terms.groupby(
+        ['udm.principal.user.userid', 'timestamp', 'search_term', 'search_engine']
+    )
     .size()
     .reset_index(name='count')
 )
