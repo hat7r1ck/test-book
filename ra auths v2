@@ -1,0 +1,368 @@
+# Authentication Analysis Notebook
+
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import scipy.stats as stats
+import matplotlib.pyplot as plt
+import ipywidgets as widgets
+from IPython.display import display
+import warnings
+warnings.filterwarnings('ignore')
+
+# Configuration settings
+config = {
+    'weights': {
+        'source_ip': 15,
+        'device_id': 25,
+        'user_agent': 10,
+        'login_hour': 10,
+        'authentication_type': 10,
+        'authentication_result': 10,
+        'location': 20
+    },
+    'thresholds': {
+        'low_risk': [0, 0],
+        'moderate_risk': [1, 50],
+        'high_risk': [51, 85],
+        'critical_risk': [86, 100]
+    },
+    'risk_level_recommendations': {
+        'Low Risk': "No immediate action required.",
+        'Moderate Risk': "Review the event for any anomalies.",
+        'High Risk': "Investigate the event for potential security issues.",
+        'Critical Risk': "Immediate investigation is required. Escalate to the security team."
+    }
+}
+
+# Function to load the data with error handling
+def load_data(csv_file_path):
+    try:
+        df = pd.read_csv(csv_file_path)
+        print("Data loaded successfully.")
+        return df
+    except FileNotFoundError:
+        print("Error: The file was not found. Please check the file path.")
+        return None
+    except pd.errors.ParserError:
+        print("Error: The file could not be parsed. Please ensure it is a valid CSV file.")
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return None
+
+# Widgets for user input
+csv_file_input = widgets.Text(
+    value='',
+    placeholder='Enter CSV file path',
+    description='CSV File:',
+    disabled=False
+)
+
+user_id_input = widgets.Text(
+    value='',
+    placeholder='Enter User ID',
+    description='User ID:',
+    disabled=False
+)
+
+source_ip_input = widgets.Text(
+    value='',
+    placeholder='Enter Source IP',
+    description='Source IP:',
+    disabled=False
+)
+
+device_id_input = widgets.Text(
+    value='',
+    placeholder='Enter Device ID',
+    description='Device ID:',
+    disabled=False
+)
+
+user_agent_input = widgets.Text(
+    value='',
+    placeholder='Enter User Agent',
+    description='User Agent:',
+    disabled=False
+)
+
+auth_type_input = widgets.Text(
+    value='',
+    placeholder='Enter Authentication Type',
+    description='Auth Type:',
+    disabled=False
+)
+
+auth_result_input = widgets.Text(
+    value='',
+    placeholder='Enter Authentication Result',
+    description='Auth Result:',
+    disabled=False
+)
+
+country_input = widgets.Text(
+    value='',
+    placeholder='Enter Country',
+    description='Country:',
+    disabled=False
+)
+
+state_input = widgets.Text(
+    value='',
+    placeholder='Enter State',
+    description='State:',
+    disabled=False
+)
+
+timestamp_input = widgets.Text(
+    value='',
+    placeholder='YYYY-MM-DD HH:MM:SS',
+    description='Timestamp:',
+    disabled=False
+)
+
+submit_button = widgets.Button(
+    description='Analyze',
+    disabled=False,
+    button_style='success',
+    tooltip='Click to analyze the alert event',
+    icon='check'
+)
+
+# Display the widgets
+display(csv_file_input, user_id_input, source_ip_input, device_id_input, user_agent_input,
+        auth_type_input, auth_result_input, country_input, state_input, timestamp_input, submit_button)
+
+def on_submit_button_clicked(b):
+    # Load data
+    csv_file_path = csv_file_input.value.strip()
+    df = load_data(csv_file_path)
+    if df is None:
+        return
+
+    # Collect alert event details
+    alert_event = {
+        'timestamp': timestamp_input.value.strip(),
+        'user_id': user_id_input.value.strip(),
+        'source_ip': source_ip_input.value.strip(),
+        'device_id': device_id_input.value.strip(),
+        'user_agent': user_agent_input.value.strip(),
+        'authentication_type': auth_type_input.value.strip(),
+        'authentication_result': auth_result_input.value.strip(),
+        'country': country_input.value.strip(),
+        'state': state_input.value.strip()
+    }
+
+    # Input validation
+    required_fields = ['timestamp', 'user_id', 'source_ip', 'device_id', 'user_agent',
+                       'authentication_type', 'authentication_result', 'country', 'state']
+
+    missing_fields = [field for field in required_fields if not alert_event[field]]
+    if missing_fields:
+        print(f"Error: The following fields are missing or empty: {', '.join(missing_fields)}")
+        return
+
+    # Validate timestamp
+    try:
+        alert_event['timestamp'] = pd.to_datetime(alert_event['timestamp'])
+    except ValueError:
+        print("Error: Invalid timestamp format. Please use 'YYYY-MM-DD HH:MM:SS'")
+        return
+
+    # Proceed with analysis
+    perform_analysis(df, alert_event)
+
+submit_button.on_click(on_submit_button_clicked)
+
+def perform_analysis(df, alert_event):
+    # Normalize fields
+    fields_to_normalize = ['user_id', 'device_id', 'authentication_type', 'user_agent',
+                           'country', 'state', 'authentication_result']
+
+    for field in fields_to_normalize:
+        if field in df.columns:
+            df[field] = df[field].astype(str).str.strip().str.lower()
+        else:
+            df[field] = 'unknown'
+
+    df['source_ip'] = df['source_ip'].fillna('unknown').astype(str).str.strip().str.lower()
+
+    # Normalize alert event fields
+    for field in fields_to_normalize:
+        alert_event[field] = alert_event[field].strip().lower()
+    alert_event['source_ip'] = alert_event['source_ip'].strip().lower()
+
+    # Ensure timestamp is in datetime format
+    alert_event['timestamp'] = pd.to_datetime(alert_event['timestamp'], errors='coerce')
+    if pd.isnull(alert_event['timestamp']):
+        print("Error: Invalid timestamp in alert event.")
+        return
+
+    # Filter user history
+    alert_user_id = alert_event['user_id']
+    user_history = df[df['user_id'] == alert_user_id]
+    total_events = len(user_history)
+
+    if total_events == 0:
+        print(f"No historical data found for user '{alert_user_id}'.")
+        return
+
+    # Initialize findings
+    detailed_findings = {}
+    risk_score_components = {}
+
+    # Define characteristics and weights from config
+    characteristics = {
+        'Source IP Address': ('source_ip', config['weights']['source_ip']),
+        'Device ID': ('device_id', config['weights']['device_id']),
+        'User Agent': ('user_agent', config['weights']['user_agent']),
+        'Login Hour': ('hour', config['weights']['login_hour']),
+        'Authentication Type': ('authentication_type', config['weights']['authentication_type']),
+        'Authentication Result': ('authentication_result', config['weights']['authentication_result']),
+        'Location': ('location', config['weights']['location']),
+    }
+
+    # Perform analysis
+    for characteristic, (field_name, weight) in characteristics.items():
+        if characteristic == 'Login Hour':
+            alert_value = alert_event['timestamp'].hour
+            user_history['hour'] = user_history['timestamp'].dt.hour
+            field_series = user_history['hour']
+        elif characteristic == 'Location':
+            location_matches = user_history[
+                (user_history['country'] == alert_event['country']) &
+                (user_history['state'] == alert_event['state'])
+            ]
+            usage_count = len(location_matches)
+            usage_percentage = (usage_count / total_events) * 100 if total_events > 0 else 0
+            used_before = usage_count > 0
+            detailed_findings[characteristic] = {
+                'used_before': used_before,
+                'usage_count': usage_count,
+                'usage_percentage': usage_percentage,
+                'weight': weight
+            }
+            risk_score_components[characteristic] = 0 if used_before else weight
+            continue
+        else:
+            alert_value = alert_event[field_name]
+            field_series = user_history[field_name]
+
+        used_before, usage_count, usage_percentage = calculate_usage_count_and_percentage(field_series, alert_value)
+        detailed_findings[characteristic] = {
+            'used_before': used_before,
+            'usage_count': usage_count,
+            'usage_percentage': usage_percentage,
+            'weight': weight
+        }
+        risk_score_components[characteristic] = 0 if used_before else weight
+
+    # Calculate total risk score
+    total_risk_score = sum(risk_score_components.values())
+    max_possible_score = sum(weight for _, weight in characteristics.items())
+    risk_percentage = (total_risk_score / max_possible_score) * 100
+
+    # Determine risk level
+    thresholds = config['thresholds']
+    if risk_percentage == 0:
+        risk_level = 'Low Risk'
+    elif risk_percentage <= thresholds['moderate_risk'][1]:
+        risk_level = 'Moderate Risk'
+    elif risk_percentage <= thresholds['high_risk'][1]:
+        risk_level = 'High Risk'
+    else:
+        risk_level = 'Critical Risk'
+
+    conclusion = config['risk_level_recommendations'][risk_level]
+
+    # Display findings
+    display_analysis_results(alert_event, detailed_findings, total_events, risk_percentage, risk_level, conclusion)
+
+    # Perform anomaly detection
+    perform_anomaly_detection(user_history, alert_event)
+
+    # Visualizations
+    visualize_data(user_history, alert_event)
+
+    # Export to Excel
+    export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion)
+
+def calculate_usage_count_and_percentage(user_history_field, alert_value):
+    counts = user_history_field.value_counts()
+    usage_count = counts.get(alert_value, 0)
+    usage_percentage = (usage_count / len(user_history_field)) * 100 if len(user_history_field) > 0 else 0
+    used_before = usage_count > 0
+    return used_before, usage_count, usage_percentage
+
+def display_analysis_results(alert_event, detailed_findings, total_events, risk_percentage, risk_level, conclusion):
+    thresholds = config['thresholds']
+    print("\nDetailed Analysis of Alert Event Compared to User's Historical Data:\n")
+    print(f"Total number of historical logins for user '{alert_event['user_id']}': {total_events}\n")
+    print("Characteristic Analysis:")
+    for characteristic, data in detailed_findings.items():
+        status = 'Yes' if data['used_before'] else 'No'
+        usage_info = f"Used {int(data['usage_count'])} times ({data['usage_percentage']:.2f}% of logins)"
+        weight_info = f"Weight: {data['weight']}%"
+        print(f"- {characteristic} ({weight_info})\n  Seen Before: {status}\n  {usage_info}\n")
+    
+    # Output the risk score and thresholds
+    print(f"Total Risk Score: {risk_percentage:.2f}% (on a scale from 0 to 100%)")
+    print(f"Risk Level: {risk_level}\n")
+    print("Risk Thresholds:")
+    for level, (lower, upper) in thresholds.items():
+        print(f"- {level}: {lower}% - {upper}% Risk")
+    
+    # Output the conclusion
+    print(f"\nConclusion: {conclusion}")
+    print(f"Recommendation: {config['risk_level_recommendations'][risk_level]}")
+
+def perform_anomaly_detection(user_history, alert_event):
+    print("\nAnomaly Detection:")
+    if len(user_history) > 1:
+        # Anomaly detection on login hours
+        login_hours = user_history['timestamp'].dt.hour
+        if login_hours.std() == 0:
+            print("- Cannot perform anomaly detection on login hours due to zero standard deviation.")
+        else:
+            z_scores = np.abs(stats.zscore(login_hours))
+            threshold = 2
+            anomalies = login_hours[z_scores > threshold]
+            
+            alert_hour = alert_event['timestamp'].hour
+            alert_hour_z_score = np.abs((alert_hour - login_hours.mean()) / login_hours.std())
+            
+            if alert_hour_z_score > threshold:
+                print(f"- The login hour {alert_hour} is anomalous compared to the user's historical login hours.")
+            else:
+                print(f"- The login hour {alert_hour} is within normal range.")
+    else:
+        print("- Not enough data for anomaly detection.")
+
+def visualize_data(user_history, alert_event):
+    # Visualize login hours
+    if len(user_history) > 0:
+        plt.figure(figsize=(10, 6))
+        sns.histplot(user_history['timestamp'].dt.hour, bins=24, kde=False)
+        plt.axvline(alert_event['timestamp'].hour, color='red', linestyle='--', label='Alert Event Hour')
+        plt.title(f"Login Hour Distribution for User '{alert_event['user_id']}'")
+        plt.xlabel('Hour of Day')
+        plt.ylabel('Number of Logins')
+        plt.legend()
+        plt.show()
+    else:
+        print("No historical data available for visualization.")
+
+def export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion):
+    # Prepare data for export
+    df_export = pd.DataFrame.from_dict(detailed_findings, orient='index')
+    df_export.reset_index(inplace=True)
+    df_export.rename(columns={'index': 'Characteristic'}, inplace=True)
+    df_export['Risk Score'] = risk_percentage
+    df_export['Risk Level'] = risk_level
+    df_export['Conclusion'] = conclusion
+
+    # Export to Excel
+    output_file = 'authentication_analysis_results.xlsx'
+    df_export.to_excel(output_file, index=False)
+    print(f"\nResults have been exported to '{output_file}'")
