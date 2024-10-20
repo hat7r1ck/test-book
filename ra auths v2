@@ -65,8 +65,9 @@ dataset_box = widgets.VBox([widgets.Label(value="Dataset Input:"), csv_file_inpu
 
 # Widgets for alert event input
 alert_fields = [
-    ('udm.event_timestamp', 'Timestamp:', 'YYYY-MM-DD HH:MM:SS'),
+    ('timestamps', 'Timestamp:', 'Enter Timestamp'),
     ('udm.principal.user.userid', 'User ID:', 'Enter User ID'),
+    ('udm.target.user.userid', 'Alternate User ID:', 'Enter User ID (if applicable)'),
     ('udm.principal.ip', 'Source IP:', 'Enter Source IP'),
     ('udm.principal.asset_id', 'Device ID:', 'Enter Device ID'),
     ('udm.network.http.user_agent', 'User Agent:', 'Enter User Agent'),
@@ -112,32 +113,29 @@ def on_submit_button_clicked(b):
     if df is None:
         return
 
-    # Ensure expected columns are present
-    expected_columns = [field_name for field_name, _ in alert_widgets]
-    missing_columns = [col for col in expected_columns if col not in df.columns]
-    if missing_columns:
-        print(f"Error: The following expected columns are missing from the dataset: {', '.join(missing_columns)}")
-        return
-
     # Collect alert event details
     alert_event = {}
     for field_name, widget in alert_widgets:
         alert_event[field_name] = widget.value.strip()
 
-    # Input validation
-    required_fields = [field_name for field_name, _ in alert_widgets]
+    # Handle alternate 'user_id' fields
+    if not alert_event['udm.principal.user.userid'] and not alert_event['udm.target.user.userid']:
+        print("Error: User ID is missing. Please provide 'User ID' or 'Alternate User ID'.")
+        return
+    elif alert_event['udm.principal.user.userid']:
+        alert_event['user_id_field'] = 'udm.principal.user.userid'
+    else:
+        alert_event['user_id_field'] = 'udm.target.user.userid'
 
-    missing_fields = [field_name for field_name in required_fields if not alert_event[field_name]]
+    # Input validation
+    required_fields = ['timestamps', 'user_id_field', 'udm.principal.ip', 'udm.principal.asset_id',
+                       'udm.network.http.user_agent', 'udm.metadata.product_name', 'udm.security_result.action',
+                       'udm.principal.ip_geo_artifact.location.country_or_region', 'udm.principal.ip_geo_artifact.location.state']
+
+    missing_fields = [field_name for field_name in required_fields if not alert_event.get(field_name)]
     if missing_fields:
         missing_descriptions = [description for field_name_loop, description, _ in alert_fields if field_name_loop in missing_fields]
         print(f"Error: The following fields are missing or empty: {', '.join(missing_descriptions)}")
-        return
-
-    # Validate timestamp
-    try:
-        alert_event['udm.event_timestamp'] = pd.to_datetime(alert_event['udm.event_timestamp'])
-    except ValueError:
-        print("Error: Invalid timestamp format. Please use 'YYYY-MM-DD HH:MM:SS'")
         return
 
     # Proceed with analysis
@@ -153,15 +151,27 @@ def perform_analysis(df, alert_event):
         'udm.metadata.product_name': 'authentication_type',
         'udm.security_result.action': 'authentication_result',
         'udm.principal.user.userid': 'user_id',
+        'udm.target.user.userid': 'user_id',  # Alternate user_id field
         'udm.principal.asset_id': 'device_id',
         'udm.principal.ip_geo_artifact.location.country_or_region': 'country',
         'udm.principal.ip_geo_artifact.location.state': 'state',
         'udm.target.application': 'application',
         'udm.principal.ip_geo_artifact.network.carrier_name': 'carrier_name',
-        'udm.event_timestamp': 'timestamp'
+        'timestamps': 'timestamp'
     }
 
-    df.rename(columns=column_mapping, inplace=True)
+    # Check for both possible 'user_id' columns in the dataset
+    if 'udm.principal.user.userid' in df.columns:
+        df['user_id'] = df['udm.principal.user.userid']
+    elif 'udm.target.user.userid' in df.columns:
+        df['user_id'] = df['udm.target.user.userid']
+    else:
+        print("Error: Neither 'udm.principal.user.userid' nor 'udm.target.user.userid' found in dataset.")
+        return
+
+    # Rename columns based on mapping, excluding 'user_id' as it's already handled
+    columns_to_rename = {k: v for k, v in column_mapping.items() if k in df.columns and v != 'user_id'}
+    df.rename(columns=columns_to_rename, inplace=True)
 
     # Ensure the 'timestamp' column is in datetime format
     df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
@@ -177,13 +187,20 @@ def perform_analysis(df, alert_event):
         else:
             df[field] = 'unknown'
 
+    # Handle alert event user_id
+    user_id_field = alert_event['user_id_field']
+    alert_event['user_id'] = alert_event[user_id_field].strip().lower()
+
     # Normalize alert event fields
     for original_field, field_name in column_mapping.items():
         if field_name in fields_to_normalize:
-            alert_event[original_field] = alert_event[original_field].strip().lower()
+            if original_field in alert_event:
+                alert_event[original_field] = alert_event[original_field].strip().lower()
+            else:
+                alert_event[original_field] = 'unknown'
 
     # Map alert event fields to internal names
-    alert_event_mapped = {field_name: alert_event[original_field] for original_field, field_name in column_mapping.items()}
+    alert_event_mapped = {field_name: alert_event.get(original_field, 'unknown') for original_field, field_name in column_mapping.items()}
 
     # Ensure timestamp is in datetime format
     alert_event_mapped['timestamp'] = pd.to_datetime(alert_event_mapped['timestamp'], errors='coerce')
