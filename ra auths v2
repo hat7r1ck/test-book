@@ -123,13 +123,13 @@ def on_submit_button_clicked(b):
     alert_event = {}
     for field_name, widget in alert_widgets:
         alert_event[field_name] = widget.value.strip()
-    
+
     # Input validation
     required_fields = [field_name for field_name, _ in alert_widgets]
 
     missing_fields = [field_name for field_name in required_fields if not alert_event[field_name]]
     if missing_fields:
-        missing_descriptions = [description for field_name, description, _ in alert_fields if field_name in missing_fields]
+        missing_descriptions = [description for field_name_loop, description, _ in alert_fields if field_name_loop in missing_fields]
         print(f"Error: The following fields are missing or empty: {', '.join(missing_descriptions)}")
         return
 
@@ -245,7 +245,7 @@ def perform_analysis(df, alert_event):
                 field_series = user_history[field_name]
             else:
                 field_series = pd.Series()
-        
+
         used_before, usage_count, usage_percentage = calculate_usage_count_and_percentage(field_series, alert_value)
         detailed_findings[characteristic] = {
             'used_before': used_before,
