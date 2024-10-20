@@ -1,0 +1,191 @@
+import pandas as pd
+
+# Load your SIEM logs into a DataFrame
+csv_file_path = input("Please enter the path to the CSV file: ")
+df = pd.read_csv(csv_file_path)
+
+# Ensure the 'timestamp' column is in datetime format
+df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+df.dropna(subset=['timestamp'], inplace=True)
+
+# Map SIEM columns to analysis fields
+df.rename(columns={
+    'udm.principal.ip': 'source_ip',
+    'udm.network.http.user_agent': 'user_agent',
+    'udm.metadata.product_name': 'authentication_type',
+    'udm.security_result.action': 'authentication_result',
+    'udm.principal.user.userid': 'user_id',  # Adjust if necessary
+    'udm.principal.asset_id': 'device_id',
+    'udm.principal.ip_geo_artifact.location.country_or_region': 'country',
+    'udm.principal.ip_geo_artifact.location.state': 'state',
+    # Add other mappings as necessary
+}, inplace=True)
+
+# Handle missing data and normalize all relevant fields
+fields_to_normalize = ['user_id', 'device_id', 'authentication_type', 'user_agent', 'country', 'state', 'authentication_result']
+
+for field in fields_to_normalize:
+    if field in df.columns:
+        df[field] = df[field].astype(str).str.strip().str.lower()
+    else:
+        df[field] = 'unknown'  # Assign 'unknown' if the field is missing
+
+# Fill missing values for 'source_ip' and normalize it
+df['source_ip'] = df['source_ip'].fillna('unknown')
+df['source_ip'] = df['source_ip'].astype(str).str.strip().str.lower()
+
+# Drop rows where 'user_id' is missing after normalization
+df.dropna(subset=['user_id'], inplace=True)
+
+# Replace the example values with the actual alert event details
+alert_event = {
+    'timestamp': pd.to_datetime('2023-10-12 14:30:00'),
+    'user_id': 'User123',  # Replace with actual user ID from the alert
+    'source_ip': '203.0.113.45',  # Replace with actual source IP
+    'device_id': 'Device456',  # Replace with actual device ID
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',  # Replace with actual user agent
+    'authentication_type': 'VPN Login',  # Replace with actual authentication type
+    'authentication_result': 'Success',  # Replace with actual result
+    'country': 'United States',  # Replace with actual country
+    'state': 'California',  # Replace with actual state
+    # Include other relevant fields as needed
+}
+
+# Normalize fields in the alert event
+for field in fields_to_normalize:
+    if field in alert_event:
+        alert_event[field] = alert_event[field].strip().lower()
+    else:
+        alert_event[field] = 'unknown'
+
+# Normalize 'source_ip' in the alert event
+alert_event['source_ip'] = alert_event['source_ip'].strip().lower()
+
+alert_df = pd.DataFrame([alert_event])
+
+# Filter the DataFrame to include only the user's data
+user_history = df[df['user_id'] == alert_event['user_id']]
+
+# Total number of events in user history
+total_events = len(user_history)
+
+# Prepare a dictionary to store detailed findings
+detailed_findings = {}
+
+# Function to calculate usage counts and percentages
+def calculate_usage_count_and_percentage(user_history_field, alert_value):
+    if total_events > 0:
+        counts = user_history_field.value_counts()
+        usage_count = counts.get(alert_value, 0)
+        usage_percentage = (usage_count / total_events) * 100
+        used_before = usage_count > 0
+    else:
+        usage_count = 0
+        usage_percentage = 0.0
+        used_before = False
+    return used_before, usage_count, usage_percentage
+
+# Analyze each characteristic
+characteristics = {
+    'Source IP Address': ('source_ip', 15),
+    'Device ID': ('device_id', 25),
+    'User Agent': ('user_agent', 10),
+    'Login Hour': ('hour', 10),
+    'Authentication Type': ('authentication_type', 10),
+    'Authentication Result': ('authentication_result', 10),
+    'Location': ('location', 20),
+}
+
+# Prepare to store risk score components
+risk_score_components = {}
+
+# Perform analysis
+for characteristic, (field_name, weight) in characteristics.items():
+    if characteristic == 'Login Hour':
+        alert_value = alert_event['timestamp'].hour
+        if total_events > 0:
+            user_history['hour'] = user_history['timestamp'].dt.hour
+            field_series = user_history['hour']
+        else:
+            field_series = pd.Series()
+    elif characteristic == 'Location':
+        if total_events > 0:
+            location_matches = user_history[
+                (user_history['country'] == alert_event['country']) &
+                (user_history['state'] == alert_event['state'])
+            ]
+            usage_count = len(location_matches)
+            usage_percentage = (usage_count / total_events) * 100 if total_events > 0 else 0
+            used_before = usage_count > 0
+        else:
+            usage_count = 0
+            usage_percentage = 0.0
+            used_before = False
+        detailed_findings[characteristic] = {
+            'used_before': used_before,
+            'usage_count': usage_count,
+            'usage_percentage': usage_percentage,
+            'weight': weight,
+        }
+        risk_score_components[characteristic] = 0 if used_before else weight
+        continue
+    else:
+        alert_value = alert_event[field_name]
+        field_series = user_history[field_name] if field_name in user_history else pd.Series()
+
+    used_before, usage_count, usage_percentage = calculate_usage_count_and_percentage(field_series, alert_value)
+    detailed_findings[characteristic] = {
+        'used_before': used_before,
+        'usage_count': usage_count,
+        'usage_percentage': usage_percentage,
+        'weight': weight,
+    }
+    # Update risk score components
+    risk_score_components[characteristic] = 0 if used_before else weight
+
+# Calculate total risk score (scale of 1-100)
+total_risk_score = sum(risk_score_components.values())
+max_possible_score = sum(weight for _, weight in characteristics.values())
+risk_percentage = (total_risk_score / max_possible_score) * 100
+
+# Define risk thresholds
+thresholds = {
+    'Low Risk': (0, 0),
+    'Moderate Risk': (1, 50),
+    'High Risk': (51, 85),
+    'Critical Risk': (86, 100),
+}
+
+# Determine the conclusion based on the risk score
+if risk_percentage == 0:
+    risk_level = 'Low Risk'
+    conclusion = "The alert event matches the user's historical behavior."
+elif risk_percentage <= 50:
+    risk_level = 'Moderate Risk'
+    conclusion = "The alert event has some new characteristics but is largely consistent with past behavior."
+elif risk_percentage <= 85:
+    risk_level = 'High Risk'
+    conclusion = "The alert event deviates from the user's historical behavior and may require attention."
+else:
+    risk_level = 'Critical Risk'
+    conclusion = "The alert event significantly deviates from the user's historical behavior and is considered high risk."
+
+# Summarize and Output the Detailed Findings
+print("\nDetailed Analysis of Alert Event Compared to User's Historical Data:\n")
+print(f"Total number of historical logins for user '{alert_event['user_id']}': {total_events}\n")
+print("Characteristic Analysis:")
+for characteristic, data in detailed_findings.items():
+    status = 'Yes' if data['used_before'] else 'No'
+    usage_info = f"Used {data['usage_count']} times ({data['usage_percentage']:.2f}% of logins)"
+    weight_info = f"Weight: {data['weight']}%"
+    print(f"- {characteristic} ({weight_info})\n  Seen Before: {status}\n  {usage_info}\n")
+
+# Output the risk score and thresholds
+print(f"Total Risk Score: {risk_percentage:.2f}% (on a scale from 0 to 100%)")
+print(f"Risk Level: {risk_level}\n")
+print("Risk Thresholds:")
+for level, (lower, upper) in thresholds.items():
+    print(f"- {level}: {lower}% - {upper}% Risk")
+
+# Output the conclusion
+print(f"\nConclusion: {conclusion}")
