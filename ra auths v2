@@ -6,20 +6,22 @@ import seaborn as sns
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 import ipywidgets as widgets
-from IPython.display import display
+from IPython.display import display, clear_output
 import warnings
 warnings.filterwarnings('ignore')
 
 # Configuration settings
 config = {
     'weights': {
-        'source_ip': 15,
-        'device_id': 25,
+        'source_ip': 10,
+        'device_id': 15,
         'user_agent': 10,
         'login_hour': 10,
         'authentication_type': 10,
         'authentication_result': 10,
-        'location': 20
+        'location': 15,
+        'application': 10,
+        'carrier_name': 10
     },
     'thresholds': {
         'low_risk': [0, 0],
@@ -51,7 +53,7 @@ def load_data(csv_file_path):
         print(f"An unexpected error occurred: {e}")
         return None
 
-# Widgets for user input
+# Widgets for dataset input
 csv_file_input = widgets.Text(
     value='',
     placeholder='Enter CSV file path',
@@ -59,69 +61,36 @@ csv_file_input = widgets.Text(
     disabled=False
 )
 
-user_id_input = widgets.Text(
-    value='',
-    placeholder='Enter User ID',
-    description='User ID:',
-    disabled=False
-)
+dataset_box = widgets.VBox([widgets.Label(value="Dataset Input:"), csv_file_input])
 
-source_ip_input = widgets.Text(
-    value='',
-    placeholder='Enter Source IP',
-    description='Source IP:',
-    disabled=False
-)
+# Widgets for alert event input
+alert_fields = [
+    ('udm.event_timestamp', 'Timestamp:', 'YYYY-MM-DD HH:MM:SS'),
+    ('udm.principal.user.userid', 'User ID:', 'Enter User ID'),
+    ('udm.principal.ip', 'Source IP:', 'Enter Source IP'),
+    ('udm.principal.asset_id', 'Device ID:', 'Enter Device ID'),
+    ('udm.network.http.user_agent', 'User Agent:', 'Enter User Agent'),
+    ('udm.metadata.product_name', 'Authentication Type:', 'Enter Authentication Type'),
+    ('udm.security_result.action', 'Authentication Result:', 'Enter Authentication Result'),
+    ('udm.principal.ip_geo_artifact.location.country_or_region', 'Country:', 'Enter Country'),
+    ('udm.principal.ip_geo_artifact.location.state', 'State:', 'Enter State'),
+    ('udm.target.application', 'Application:', 'Enter Application'),
+    ('udm.principal.ip_geo_artifact.network.carrier_name', 'Carrier Name:', 'Enter Carrier Name')
+]
 
-device_id_input = widgets.Text(
-    value='',
-    placeholder='Enter Device ID',
-    description='Device ID:',
-    disabled=False
-)
+alert_widgets = []
+for field_name, description, placeholder in alert_fields:
+    widget = widgets.Text(
+        value='',
+        placeholder=placeholder,
+        description=description,
+        disabled=False
+    )
+    alert_widgets.append((field_name, widget))
 
-user_agent_input = widgets.Text(
-    value='',
-    placeholder='Enter User Agent',
-    description='User Agent:',
-    disabled=False
-)
+alert_box = widgets.VBox([widgets.Label(value="Alert Event Details:")] + [w for _, w in alert_widgets])
 
-auth_type_input = widgets.Text(
-    value='',
-    placeholder='Enter Authentication Type',
-    description='Auth Type:',
-    disabled=False
-)
-
-auth_result_input = widgets.Text(
-    value='',
-    placeholder='Enter Authentication Result',
-    description='Auth Result:',
-    disabled=False
-)
-
-country_input = widgets.Text(
-    value='',
-    placeholder='Enter Country',
-    description='Country:',
-    disabled=False
-)
-
-state_input = widgets.Text(
-    value='',
-    placeholder='Enter State',
-    description='State:',
-    disabled=False
-)
-
-timestamp_input = widgets.Text(
-    value='',
-    placeholder='YYYY-MM-DD HH:MM:SS',
-    description='Timestamp:',
-    disabled=False
-)
-
+# Submit button
 submit_button = widgets.Button(
     description='Analyze',
     disabled=False,
@@ -131,41 +100,42 @@ submit_button = widgets.Button(
 )
 
 # Display the widgets
-display(csv_file_input, user_id_input, source_ip_input, device_id_input, user_agent_input,
-        auth_type_input, auth_result_input, country_input, state_input, timestamp_input, submit_button)
+display(dataset_box, alert_box, submit_button)
 
 def on_submit_button_clicked(b):
+    clear_output(wait=True)
+    display(dataset_box, alert_box, submit_button)
+    
     # Load data
     csv_file_path = csv_file_input.value.strip()
     df = load_data(csv_file_path)
     if df is None:
         return
 
+    # Ensure expected columns are present
+    expected_columns = [field_name for field_name, _ in alert_widgets]
+    missing_columns = [col for col in expected_columns if col not in df.columns]
+    if missing_columns:
+        print(f"Error: The following expected columns are missing from the dataset: {', '.join(missing_columns)}")
+        return
+
     # Collect alert event details
-    alert_event = {
-        'timestamp': timestamp_input.value.strip(),
-        'user_id': user_id_input.value.strip(),
-        'source_ip': source_ip_input.value.strip(),
-        'device_id': device_id_input.value.strip(),
-        'user_agent': user_agent_input.value.strip(),
-        'authentication_type': auth_type_input.value.strip(),
-        'authentication_result': auth_result_input.value.strip(),
-        'country': country_input.value.strip(),
-        'state': state_input.value.strip()
-    }
-
+    alert_event = {}
+    for field_name, widget in alert_widgets:
+        alert_event[field_name] = widget.value.strip()
+    
     # Input validation
-    required_fields = ['timestamp', 'user_id', 'source_ip', 'device_id', 'user_agent',
-                       'authentication_type', 'authentication_result', 'country', 'state']
+    required_fields = [field_name for field_name, _ in alert_widgets]
 
-    missing_fields = [field for field in required_fields if not alert_event[field]]
+    missing_fields = [field_name for field_name in required_fields if not alert_event[field_name]]
     if missing_fields:
-        print(f"Error: The following fields are missing or empty: {', '.join(missing_fields)}")
+        missing_descriptions = [description for field_name, description, _ in alert_fields if field_name in missing_fields]
+        print(f"Error: The following fields are missing or empty: {', '.join(missing_descriptions)}")
         return
 
     # Validate timestamp
     try:
-        alert_event['timestamp'] = pd.to_datetime(alert_event['timestamp'])
+        alert_event['udm.event_timestamp'] = pd.to_datetime(alert_event['udm.event_timestamp'])
     except ValueError:
         print("Error: Invalid timestamp format. Please use 'YYYY-MM-DD HH:MM:SS'")
         return
@@ -176,9 +146,30 @@ def on_submit_button_clicked(b):
 submit_button.on_click(on_submit_button_clicked)
 
 def perform_analysis(df, alert_event):
+    # Map SIEM columns to analysis fields
+    column_mapping = {
+        'udm.principal.ip': 'source_ip',
+        'udm.network.http.user_agent': 'user_agent',
+        'udm.metadata.product_name': 'authentication_type',
+        'udm.security_result.action': 'authentication_result',
+        'udm.principal.user.userid': 'user_id',
+        'udm.principal.asset_id': 'device_id',
+        'udm.principal.ip_geo_artifact.location.country_or_region': 'country',
+        'udm.principal.ip_geo_artifact.location.state': 'state',
+        'udm.target.application': 'application',
+        'udm.principal.ip_geo_artifact.network.carrier_name': 'carrier_name',
+        'udm.event_timestamp': 'timestamp'
+    }
+
+    df.rename(columns=column_mapping, inplace=True)
+
+    # Ensure the 'timestamp' column is in datetime format
+    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    df.dropna(subset=['timestamp'], inplace=True)
+
     # Normalize fields
     fields_to_normalize = ['user_id', 'device_id', 'authentication_type', 'user_agent',
-                           'country', 'state', 'authentication_result']
+                           'country', 'state', 'authentication_result', 'application', 'carrier_name', 'source_ip']
 
     for field in fields_to_normalize:
         if field in df.columns:
@@ -186,21 +177,22 @@ def perform_analysis(df, alert_event):
         else:
             df[field] = 'unknown'
 
-    df['source_ip'] = df['source_ip'].fillna('unknown').astype(str).str.strip().str.lower()
-
     # Normalize alert event fields
-    for field in fields_to_normalize:
-        alert_event[field] = alert_event[field].strip().lower()
-    alert_event['source_ip'] = alert_event['source_ip'].strip().lower()
+    for original_field, field_name in column_mapping.items():
+        if field_name in fields_to_normalize:
+            alert_event[original_field] = alert_event[original_field].strip().lower()
+
+    # Map alert event fields to internal names
+    alert_event_mapped = {field_name: alert_event[original_field] for original_field, field_name in column_mapping.items()}
 
     # Ensure timestamp is in datetime format
-    alert_event['timestamp'] = pd.to_datetime(alert_event['timestamp'], errors='coerce')
-    if pd.isnull(alert_event['timestamp']):
+    alert_event_mapped['timestamp'] = pd.to_datetime(alert_event_mapped['timestamp'], errors='coerce')
+    if pd.isnull(alert_event_mapped['timestamp']):
         print("Error: Invalid timestamp in alert event.")
         return
 
     # Filter user history
-    alert_user_id = alert_event['user_id']
+    alert_user_id = alert_event_mapped['user_id']
     user_history = df[df['user_id'] == alert_user_id]
     total_events = len(user_history)
 
@@ -221,18 +213,20 @@ def perform_analysis(df, alert_event):
         'Authentication Type': ('authentication_type', config['weights']['authentication_type']),
         'Authentication Result': ('authentication_result', config['weights']['authentication_result']),
         'Location': ('location', config['weights']['location']),
+        'Application': ('application', config['weights']['application']),
+        'Carrier Name': ('carrier_name', config['weights']['carrier_name'])
     }
 
     # Perform analysis
     for characteristic, (field_name, weight) in characteristics.items():
         if characteristic == 'Login Hour':
-            alert_value = alert_event['timestamp'].hour
+            alert_value = alert_event_mapped['timestamp'].hour
             user_history['hour'] = user_history['timestamp'].dt.hour
             field_series = user_history['hour']
         elif characteristic == 'Location':
             location_matches = user_history[
-                (user_history['country'] == alert_event['country']) &
-                (user_history['state'] == alert_event['state'])
+                (user_history['country'] == alert_event_mapped['country']) &
+                (user_history['state'] == alert_event_mapped['state'])
             ]
             usage_count = len(location_matches)
             usage_percentage = (usage_count / total_events) * 100 if total_events > 0 else 0
@@ -246,9 +240,12 @@ def perform_analysis(df, alert_event):
             risk_score_components[characteristic] = 0 if used_before else weight
             continue
         else:
-            alert_value = alert_event[field_name]
-            field_series = user_history[field_name]
-
+            alert_value = alert_event_mapped[field_name]
+            if field_name in user_history.columns:
+                field_series = user_history[field_name]
+            else:
+                field_series = pd.Series()
+        
         used_before, usage_count, usage_percentage = calculate_usage_count_and_percentage(field_series, alert_value)
         detailed_findings[characteristic] = {
             'used_before': used_before,
@@ -260,7 +257,7 @@ def perform_analysis(df, alert_event):
 
     # Calculate total risk score
     total_risk_score = sum(risk_score_components.values())
-    max_possible_score = sum(weight for _, weight in characteristics.items())
+    max_possible_score = sum(weight for _, weight in characteristics.values())
     risk_percentage = (total_risk_score / max_possible_score) * 100
 
     # Determine risk level
@@ -277,13 +274,13 @@ def perform_analysis(df, alert_event):
     conclusion = config['risk_level_recommendations'][risk_level]
 
     # Display findings
-    display_analysis_results(alert_event, detailed_findings, total_events, risk_percentage, risk_level, conclusion)
+    display_analysis_results(alert_event_mapped, detailed_findings, total_events, risk_percentage, risk_level, conclusion)
 
     # Perform anomaly detection
-    perform_anomaly_detection(user_history, alert_event)
+    perform_anomaly_detection(user_history, alert_event_mapped)
 
     # Visualizations
-    visualize_data(user_history, alert_event)
+    visualize_data(user_history, alert_event_mapped)
 
     # Export to Excel
     export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion)
