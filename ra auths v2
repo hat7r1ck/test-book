@@ -6,7 +6,7 @@ import seaborn as sns
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 import ipywidgets as widgets
-from IPython.display import display, clear_output
+from IPython.display import display, clear_output, Markdown, HTML
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -41,16 +41,16 @@ config = {
 def load_data(csv_file_path):
     try:
         df = pd.read_csv(csv_file_path)
-        print("Data loaded successfully.")
+        display(Markdown("**Data loaded successfully.**"))
         return df
     except FileNotFoundError:
-        print("Error: The file was not found. Please check the file path.")
+        display(Markdown("**Error:** The file was not found. Please check the file path."))
         return None
     except pd.errors.ParserError:
-        print("Error: The file could not be parsed. Please ensure it is a valid CSV file.")
+        display(Markdown("**Error:** The file could not be parsed. Please ensure it is a valid CSV file."))
         return None
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        display(Markdown(f"**An unexpected error occurred:** {e}"))
         return None
 
 # Widgets for dataset input
@@ -108,16 +108,20 @@ submit_button = widgets.Button(
     icon='check'
 )
 
-# Display the widgets
-display(dataset_box, alert_box, submit_button, message_output)
+# Layout: Separate input and output areas
+input_area = widgets.VBox([dataset_box, alert_box, submit_button])
+output_area = widgets.Output()
+
+# Display the widgets side by side
+display(widgets.HBox([input_area, output_area]))
 
 def on_submit_button_clicked(b):
-    with message_output:
+    with output_area:
         clear_output()
         # Load data
         csv_file_path = csv_file_input.value.strip()
         if not csv_file_path:
-            print("Error: Please enter the CSV file path.")
+            display(Markdown("**Error:** Please enter the CSV file path."))
             return
         df = load_data(csv_file_path)
         if df is None:
@@ -139,7 +143,7 @@ def on_submit_button_clicked(b):
             user_ids.append(user_id_alternate)
         
         if not user_ids:
-            print("Error: User ID is missing. Please provide 'User ID' or 'Alternate User ID'.")
+            display(Markdown("**Error:** User ID is missing. Please provide 'User ID' or 'Alternate User ID'."))
             return
 
         # Input validation
@@ -150,7 +154,7 @@ def on_submit_button_clicked(b):
         missing_fields = [field_name for field_name in required_fields if not alert_event.get(field_name)]
         if missing_fields:
             missing_descriptions = [description for field_name_loop, description, _ in alert_fields if field_name_loop in missing_fields]
-            print(f"Error: The following fields are missing or empty: {', '.join(missing_descriptions)}")
+            display(Markdown(f"**Error:** The following fields are missing or empty: {', '.join(missing_descriptions)}"))
             return
 
         # Proceed with analysis
@@ -223,7 +227,7 @@ def perform_analysis(df, user_ids, alert_event):
             raise ValueError
         alert_event_mapped['timestamp'] = alert_timestamp
     except ValueError:
-        print("Error: Invalid timestamp format. Please ensure it matches the CSV's timestamp format.")
+        display(Markdown("**Error:** Invalid timestamp format. Please ensure it matches the CSV's timestamp format."))
         return
 
     # Add 'user_id' to mapped alert_event as list
@@ -234,7 +238,7 @@ def perform_analysis(df, user_ids, alert_event):
     total_events = len(user_history)
 
     if total_events == 0:
-        print(f"No historical data found for user(s) '{', '.join(alert_event_mapped['user_ids'])}'.")
+        display(Markdown(f"**No historical data found for user(s) '{', '.join(alert_event_mapped['user_ids'])}'.**"))
         return
 
     # Initialize findings
@@ -334,33 +338,33 @@ def display_analysis_results(alert_event, detailed_findings, total_events, risk_
     thresholds = config['thresholds']
     user_ids = alert_event['user_ids']
     user_ids_display = ', '.join(user_ids) if len(user_ids) > 1 else user_ids[0]
-    print("\n**Detailed Analysis of Alert Event Compared to User's Historical Data:**\n")
-    print(f"**Total number of historical logins for user(s) '{user_ids_display}': {total_events}**\n")
-    print("**Characteristic Analysis:**")
+    display(Markdown("\n**Detailed Analysis of Alert Event Compared to User's Historical Data:**\n"))
+    display(Markdown(f"**Total number of historical logins for user(s) '{user_ids_display}': {total_events}**\n"))
+    display(Markdown("**Characteristic Analysis:**"))
     for characteristic, data in detailed_findings.items():
         status = 'Yes' if data['used_before'] else 'No'
         usage_info = f"Used {int(data['usage_count'])} times ({data['usage_percentage']:.2f}% of logins)"
         weight_info = f"Weight: {data['weight']}%"
-        print(f"- **{characteristic}** ({weight_info})\n  - **Seen Before:** {status}\n  - **{usage_info}**\n")
+        display(Markdown(f"- **{characteristic}** ({weight_info})\n  - **Seen Before:** {status}\n  - **{usage_info}**\n"))
     
     # Output the risk score and thresholds
-    print(f"**Total Risk Score:** {risk_percentage:.2f}% (on a scale from 0 to 100%)")
-    print(f"**Risk Level:** {risk_level}\n")
-    print("**Risk Thresholds:**")
+    display(Markdown(f"**Total Risk Score:** {risk_percentage:.2f}% (on a scale from 0 to 100%)"))
+    display(Markdown(f"**Risk Level:** {risk_level}\n"))
+    display(Markdown("**Risk Thresholds:**"))
     for level, (lower, upper) in thresholds.items():
-        print(f"- **{level}:** {lower}% - {upper}% Risk")
+        display(Markdown(f"- **{level}:** {lower}% - {upper}% Risk"))
     
     # Output the conclusion
-    print(f"\n**Conclusion:** {conclusion}")
-    print(f"**Recommendation:** {config['risk_level_recommendations'][risk_level]}")
+    display(Markdown(f"\n**Conclusion:** {conclusion}"))
+    display(Markdown(f"**Recommendation:** {config['risk_level_recommendations'][risk_level]}"))
 
 def perform_anomaly_detection(user_history, alert_event):
-    print("\n**Anomaly Detection:**")
+    display(Markdown("\n**Anomaly Detection:**"))
     if len(user_history) > 1:
         # Anomaly detection on login hours
         login_hours = user_history['timestamp'].dt.hour
         if login_hours.std() == 0:
-            print("- Cannot perform anomaly detection on login hours due to zero standard deviation.")
+            display(Markdown("- Cannot perform anomaly detection on login hours due to zero standard deviation."))
         else:
             z_scores = np.abs(stats.zscore(login_hours))
             threshold = 2
@@ -370,25 +374,28 @@ def perform_anomaly_detection(user_history, alert_event):
             alert_hour_z_score = np.abs((alert_hour - login_hours.mean()) / login_hours.std())
             
             if alert_hour_z_score > threshold:
-                print(f"- The login hour **{alert_hour}** is anomalous compared to the user's historical login hours.")
+                display(Markdown(f"- The login hour **{alert_hour}** is anomalous compared to the user's historical login hours."))
             else:
-                print(f"- The login hour **{alert_hour}** is within the normal range.")
+                display(Markdown(f"- The login hour **{alert_hour}** is within the normal range."))
     else:
-        print("- Not enough data for anomaly detection.")
+        display(Markdown("- Not enough data for anomaly detection."))
 
 def visualize_data(user_history, alert_event):
     # Visualize login hours
     if len(user_history) > 0:
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(12, 6))
         sns.histplot(user_history['timestamp'].dt.hour, bins=24, kde=False, color='skyblue', edgecolor='black')
-        plt.axvline(alert_event['timestamp'].hour, color='red', linestyle='--', label='Alert Event Hour')
-        plt.title(f"Login Hour Distribution for User(s) '{', '.join(alert_event['user_ids'])}'")
-        plt.xlabel('Hour of Day')
-        plt.ylabel('Number of Logins')
+        plt.axvline(alert_event['timestamp'].hour, color='red', linestyle='--', linewidth=2, label='Alert Event Hour')
+        plt.title(f"Login Hour Distribution for User(s) '{', '.join(alert_event['user_ids'])}'", fontsize=14)
+        plt.xlabel('Hour of Day', fontsize=12)
+        plt.ylabel('Number of Logins', fontsize=12)
+        plt.xticks(range(0, 24))  # Ensures all hours are displayed
         plt.legend()
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
         plt.show()
     else:
-        print("No historical data available for visualization.")
+        display(Markdown("**No historical data available for visualization.**"))
 
 def export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion):
     # Prepare data for export
@@ -403,6 +410,7 @@ def export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion):
     output_file = 'authentication_analysis_results.xlsx'
     try:
         df_export.to_excel(output_file, index=False)
-        print(f"\n**Results have been exported to '{output_file}'.**")
+        display(Markdown(f"\n**Results have been exported to '{output_file}'.**"))
     except Exception as e:
-        print(f"\nError exporting results to Excel: {e}")
+        display(Markdown(f"\n**Error exporting results to Excel:** {e}"))
+
