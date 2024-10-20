@@ -61,8 +61,9 @@ csv_file_input = widgets.Text(
     disabled=False
 )
 
+dataset_label = widgets.Markdown("**Dataset Input:**")
 dataset_box = widgets.VBox([
-    widgets.Label(value="**Dataset Input:**"),
+    dataset_label,
     csv_file_input
 ])
 
@@ -92,8 +93,9 @@ for field_name, description, placeholder in alert_fields:
     )
     alert_widgets.append((field_name, widget))
 
+alert_label = widgets.Markdown("**Alert Event Details:**")
 alert_box = widgets.VBox([
-    widgets.Label(value="**Alert Event Details:**")
+    alert_label
 ] + [w for _, w in alert_widgets])
 
 # Output widget for messages
@@ -108,15 +110,15 @@ submit_button = widgets.Button(
     icon='check'
 )
 
-# Layout: Separate input and output areas
-input_area = widgets.VBox([dataset_box, alert_box, submit_button])
+# Layout: Separate input and output areas vertically
+input_area = widgets.VBox([dataset_box, alert_box, submit_button, message_output])
 output_area = widgets.Output()
 
-# Display the widgets side by side
-display(widgets.HBox([input_area, output_area]))
+# Display the widgets
+display(input_area)
 
 def on_submit_button_clicked(b):
-    with output_area:
+    with message_output:
         clear_output()
         # Load data
         csv_file_path = csv_file_input.value.strip()
@@ -413,4 +415,3 @@ def export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion):
         display(Markdown(f"\n**Results have been exported to '{output_file}'.**"))
     except Exception as e:
         display(Markdown(f"\n**Error exporting results to Excel:** {e}"))
-
