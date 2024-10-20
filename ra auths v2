@@ -68,7 +68,7 @@ dataset_box = widgets.VBox([
 
 # Widgets for alert event input
 alert_fields = [
-    ('timestamps', 'Timestamp:', 'Enter Timestamp'),
+    ('timestamp', 'Timestamp:', 'Enter Timestamp'),
     ('udm.principal.user.userid', 'User ID:', 'Enter User ID'),
     ('udm.target.user.userid', 'Alternate User ID:', 'Enter User ID (if applicable)'),
     ('udm.principal.ip', 'Source IP:', 'Enter Source IP'),
@@ -116,6 +116,9 @@ def on_submit_button_clicked(b):
         clear_output()
         # Load data
         csv_file_path = csv_file_input.value.strip()
+        if not csv_file_path:
+            print("Error: Please enter the CSV file path.")
+            return
         df = load_data(csv_file_path)
         if df is None:
             return
@@ -129,16 +132,18 @@ def on_submit_button_clicked(b):
         user_id_primary = alert_event.get('udm.principal.user.userid', '').lower()
         user_id_alternate = alert_event.get('udm.target.user.userid', '').lower()
         
-        if not user_id_primary and not user_id_alternate:
+        user_ids = []
+        if user_id_primary:
+            user_ids.append(user_id_primary)
+        if user_id_alternate:
+            user_ids.append(user_id_alternate)
+        
+        if not user_ids:
             print("Error: User ID is missing. Please provide 'User ID' or 'Alternate User ID'.")
             return
-        elif user_id_primary:
-            alert_event['user_id'] = user_id_primary
-        else:
-            alert_event['user_id'] = user_id_alternate
 
         # Input validation
-        required_fields = ['timestamps', 'udm.principal.ip', 'udm.principal.asset_id',
+        required_fields = ['timestamp', 'udm.principal.ip', 'udm.principal.asset_id',
                            'udm.network.http.user_agent', 'udm.metadata.product_name', 'udm.security_result.action',
                            'udm.principal.ip_geo_artifact.location.country_or_region', 'udm.principal.ip_geo_artifact.location.state']
         
@@ -149,9 +154,11 @@ def on_submit_button_clicked(b):
             return
 
         # Proceed with analysis
-        perform_analysis(df, alert_event)
+        perform_analysis(df, user_ids, alert_event)
 
-def perform_analysis(df, alert_event):
+submit_button.on_click(on_submit_button_clicked)
+
+def perform_analysis(df, user_ids, alert_event):
     # Map SIEM columns to analysis fields
     column_mapping = {
         'udm.principal.ip': 'source_ip',
@@ -165,17 +172,24 @@ def perform_analysis(df, alert_event):
         'udm.principal.ip_geo_artifact.location.state': 'state',
         'udm.target.application': 'application',
         'udm.principal.ip_geo_artifact.network.carrier_name': 'carrier_name',
-        'timestamps': 'timestamp'
+        'timestamp': 'timestamp'
     }
 
     # Check for both possible 'user_id' columns in the dataset
     if 'udm.principal.user.userid' in df.columns:
-        df['user_id'] = df['udm.principal.user.userid']
-    elif 'udm.target.user.userid' in df.columns:
-        df['user_id'] = df['udm.target.user.userid']
+        df['user_id_primary'] = df['udm.principal.user.userid']
     else:
-        print("Error: Neither 'udm.principal.user.userid' nor 'udm.target.user.userid' found in dataset.")
-        return
+        df['user_id_primary'] = ''
+    if 'udm.target.user.userid' in df.columns:
+        df['user_id_alternate'] = df['udm.target.user.userid']
+    else:
+        df['user_id_alternate'] = ''
+
+    # Create a unified 'user_id' column
+    df['user_id'] = df['user_id_primary'].fillna('') + ',' + df['user_id_alternate'].fillna('')
+    df['user_id'] = df['user_id'].str.strip(',').str.lower()
+    df['user_id'] = df['user_id'].replace('', np.nan)
+    df['user_id'] = df['user_id'].astype(str)
 
     # Rename columns based on mapping, excluding 'user_id' as it's already handled
     columns_to_rename = {k: v for k, v in column_mapping.items() if k in df.columns and v != 'user_id'}
@@ -196,19 +210,15 @@ def perform_analysis(df, alert_event):
             df[field] = 'unknown'
 
     # Normalize alert event fields
-    # Since 'user_id' is already handled, ensure other fields are normalized
     alert_event_mapped = {}
     for original_field, internal_field in column_mapping.items():
         if internal_field in fields_to_normalize:
-            if original_field == 'udm.principal.user.userid' or original_field == 'udm.target.user.userid':
-                # 'user_id' is already handled
-                continue
             value = alert_event.get(original_field, 'unknown').strip().lower()
             alert_event_mapped[internal_field] = value
 
     # Handle 'timestamp' separately
     try:
-        alert_timestamp = pd.to_datetime(alert_event['timestamps'], errors='coerce')
+        alert_timestamp = pd.to_datetime(alert_event['timestamp'], errors='coerce')
         if pd.isnull(alert_timestamp):
             raise ValueError
         alert_event_mapped['timestamp'] = alert_timestamp
@@ -216,16 +226,15 @@ def perform_analysis(df, alert_event):
         print("Error: Invalid timestamp format. Please ensure it matches the CSV's timestamp format.")
         return
 
-    # Add 'user_id' to mapped alert_event
-    alert_event_mapped['user_id'] = alert_event['user_id']
+    # Add 'user_id' to mapped alert_event as list
+    alert_event_mapped['user_ids'] = user_ids
 
     # Filter user history
-    alert_user_id = alert_event_mapped['user_id']
-    user_history = df[df['user_id'] == alert_user_id]
+    user_history = df[df['user_id'].apply(lambda x: any(uid in x.split(',') for uid in alert_event_mapped['user_ids']))]
     total_events = len(user_history)
 
     if total_events == 0:
-        print(f"No historical data found for user '{alert_user_id}'.")
+        print(f"No historical data found for user(s) '{', '.join(alert_event_mapped['user_ids'])}'.")
         return
 
     # Initialize findings
@@ -249,6 +258,7 @@ def perform_analysis(df, alert_event):
     for characteristic, (field_name, weight) in characteristics.items():
         if characteristic == 'Login Hour':
             alert_value = alert_event_mapped['timestamp'].hour
+            user_history = user_history.copy()
             user_history['hour'] = user_history['timestamp'].dt.hour
             field_series = user_history['hour']
         elif characteristic == 'Location':
@@ -322,8 +332,10 @@ def calculate_usage_count_and_percentage(user_history_field, alert_value):
 
 def display_analysis_results(alert_event, detailed_findings, total_events, risk_percentage, risk_level, conclusion):
     thresholds = config['thresholds']
+    user_ids = alert_event['user_ids']
+    user_ids_display = ', '.join(user_ids) if len(user_ids) > 1 else user_ids[0]
     print("\n**Detailed Analysis of Alert Event Compared to User's Historical Data:**\n")
-    print(f"**Total number of historical logins for user '{alert_event['user_id']}': {total_events}**\n")
+    print(f"**Total number of historical logins for user(s) '{user_ids_display}': {total_events}**\n")
     print("**Characteristic Analysis:**")
     for characteristic, data in detailed_findings.items():
         status = 'Yes' if data['used_before'] else 'No'
@@ -370,7 +382,7 @@ def visualize_data(user_history, alert_event):
         plt.figure(figsize=(10, 6))
         sns.histplot(user_history['timestamp'].dt.hour, bins=24, kde=False, color='skyblue', edgecolor='black')
         plt.axvline(alert_event['timestamp'].hour, color='red', linestyle='--', label='Alert Event Hour')
-        plt.title(f"Login Hour Distribution for User '{alert_event['user_id']}'")
+        plt.title(f"Login Hour Distribution for User(s) '{', '.join(alert_event['user_ids'])}'")
         plt.xlabel('Hour of Day')
         plt.ylabel('Number of Logins')
         plt.legend()
