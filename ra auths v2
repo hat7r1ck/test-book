@@ -1,5 +1,5 @@
 # Authentication Analysis Notebook
- 
+
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -9,7 +9,7 @@ import ipywidgets as widgets
 from IPython.display import display, clear_output, Markdown, HTML
 import warnings
 warnings.filterwarnings('ignore')
- 
+
 # Configuration settings
 config = {
     'weights': {
@@ -36,7 +36,7 @@ config = {
         'Critical Risk': "Immediate investigation is required. Escalate to the security team."
     }
 }
- 
+
 # Function to load the data with error handling
 def load_data(csv_file_path):
     try:
@@ -52,7 +52,7 @@ def load_data(csv_file_path):
     except Exception as e:
         display(Markdown(f"**An unexpected error occurred:** {e}"))
         return None
- 
+
 # Widgets for dataset input
 csv_file_input = widgets.Text(
     value='',
@@ -60,13 +60,14 @@ csv_file_input = widgets.Text(
     description='CSV File:',
     disabled=False
 )
- 
-dataset_label = widgets.Markdown("**Dataset Input:**")
+
+# Using HTML to format labels instead of Markdown widgets
+dataset_label = widgets.HTML("<b>Dataset Input:</b>")
 dataset_box = widgets.VBox([
     dataset_label,
     csv_file_input
 ])
- 
+
 # Widgets for alert event input
 alert_fields = [
     ('timestamp', 'Timestamp:', 'Enter Timestamp'),
@@ -82,7 +83,7 @@ alert_fields = [
     ('udm.target.application', 'Application:', 'Enter Application'),
     ('udm.principal.ip_geo_artifact.network.carrier_name', 'Carrier Name:', 'Enter Carrier Name')
 ]
- 
+
 alert_widgets = []
 for field_name, description, placeholder in alert_fields:
     widget = widgets.Text(
@@ -92,15 +93,15 @@ for field_name, description, placeholder in alert_fields:
         disabled=False
     )
     alert_widgets.append((field_name, widget))
- 
-alert_label = widgets.Markdown("**Alert Event Details:**")
+
+alert_label = widgets.HTML("<b>Alert Event Details:</b>")
 alert_box = widgets.VBox([
     alert_label
 ] + [w for _, w in alert_widgets])
- 
+
 # Output widget for messages
 message_output = widgets.Output()
- 
+
 # Submit button
 submit_button = widgets.Button(
     description='Analyze',
@@ -109,13 +110,13 @@ submit_button = widgets.Button(
     tooltip='Click to analyze the alert event',
     icon='check'
 )
- 
+
 # Layout: Separate input and output areas vertically
 input_area = widgets.VBox([dataset_box, alert_box, submit_button, message_output])
- 
+
 # Display the widgets
 display(input_area)
- 
+
 def on_submit_button_clicked(b):
     with message_output:
         clear_output()
@@ -127,42 +128,42 @@ def on_submit_button_clicked(b):
         df = load_data(csv_file_path)
         if df is None:
             return
- 
+
         # Collect alert event details
         alert_event = {}
         for field_name, widget in alert_widgets:
             alert_event[field_name] = widget.value.strip()
-         
+        
         # Handle alternate 'user_id' fields
         user_id_primary = alert_event.get('udm.principal.user.userid', '').lower()
         user_id_alternate = alert_event.get('udm.target.user.userid', '').lower()
-         
+        
         user_ids = []
         if user_id_primary:
             user_ids.append(user_id_primary)
         if user_id_alternate:
             user_ids.append(user_id_alternate)
-         
+        
         if not user_ids:
             display(Markdown("**Error:** User ID is missing. Please provide 'User ID' or 'Alternate User ID'."))
             return
- 
+
         # Input validation
         required_fields = ['timestamp', 'udm.principal.ip', 'udm.principal.asset_id',
                            'udm.network.http.user_agent', 'udm.metadata.product_name', 'udm.security_result.action',
                            'udm.principal.ip_geo_artifact.location.country_or_region', 'udm.principal.ip_geo_artifact.location.state']
-         
+        
         missing_fields = [field_name for field_name in required_fields if not alert_event.get(field_name)]
         if missing_fields:
             missing_descriptions = [description for field_name_loop, description, _ in alert_fields if field_name_loop in missing_fields]
             display(Markdown(f"**Error:** The following fields are missing or empty: {', '.join(missing_descriptions)}"))
             return
- 
+
         # Proceed with analysis
         perform_analysis(df, user_ids, alert_event)
- 
+
 submit_button.on_click(on_submit_button_clicked)
- 
+
 def perform_analysis(df, user_ids, alert_event):
     # Map SIEM columns to analysis fields
     column_mapping = {
@@ -179,7 +180,7 @@ def perform_analysis(df, user_ids, alert_event):
         'udm.principal.ip_geo_artifact.network.carrier_name': 'carrier_name',
         'timestamp': 'timestamp'
     }
- 
+
     # Check for both possible 'user_id' columns in the dataset
     if 'udm.principal.user.userid' in df.columns:
         df['user_id_primary'] = df['udm.principal.user.userid']
@@ -189,38 +190,38 @@ def perform_analysis(df, user_ids, alert_event):
         df['user_id_alternate'] = df['udm.target.user.userid']
     else:
         df['user_id_alternate'] = ''
- 
+
     # Create a unified 'user_id' column
     df['user_id'] = df['user_id_primary'].fillna('') + ',' + df['user_id_alternate'].fillna('')
     df['user_id'] = df['user_id'].str.strip(',').str.lower()
     df['user_id'] = df['user_id'].replace('', np.nan)
     df['user_id'] = df['user_id'].astype(str)
- 
+
     # Rename columns based on mapping, excluding 'user_id' as it's already handled
     columns_to_rename = {k: v for k, v in column_mapping.items() if k in df.columns and v != 'user_id'}
     df.rename(columns=columns_to_rename, inplace=True)
- 
+
     # Ensure the 'timestamp' column is in datetime format
     df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
     df.dropna(subset=['timestamp'], inplace=True)
- 
+
     # Normalize fields
     fields_to_normalize = ['user_id', 'device_id', 'authentication_type', 'user_agent',
                            'country', 'state', 'authentication_result', 'application', 'carrier_name', 'source_ip']
- 
+
     for field in fields_to_normalize:
         if field in df.columns:
             df[field] = df[field].astype(str).str.strip().str.lower()
         else:
             df[field] = 'unknown'
- 
+
     # Normalize alert event fields
     alert_event_mapped = {}
     for original_field, internal_field in column_mapping.items():
         if internal_field in fields_to_normalize:
             value = alert_event.get(original_field, 'unknown').strip().lower()
             alert_event_mapped[internal_field] = value
- 
+
     # Handle 'timestamp' separately
     try:
         alert_timestamp = pd.to_datetime(alert_event['timestamp'], errors='coerce')
@@ -230,22 +231,22 @@ def perform_analysis(df, user_ids, alert_event):
     except ValueError:
         display(Markdown("**Error:** Invalid timestamp format. Please ensure it matches the CSV's timestamp format."))
         return
- 
+
     # Add 'user_id' to mapped alert_event as list
     alert_event_mapped['user_ids'] = user_ids
- 
+
     # Filter user history
     user_history = df[df['user_id'].apply(lambda x: any(uid in x.split(',') for uid in alert_event_mapped['user_ids']))]
     total_events = len(user_history)
- 
+
     if total_events == 0:
         display(Markdown(f"**No historical data found for user(s) '{', '.join(alert_event_mapped['user_ids'])}'.**"))
         return
- 
+
     # Initialize findings
     detailed_findings = {}
     risk_score_components = {}
- 
+
     # Define characteristics and weights from config
     characteristics = {
         'Source IP Address': ('source_ip', config['weights']['source_ip']),
@@ -258,7 +259,7 @@ def perform_analysis(df, user_ids, alert_event):
         'Application': ('application', config['weights']['application']),
         'Carrier Name': ('carrier_name', config['weights']['carrier_name'])
     }
- 
+
     # Perform analysis
     for characteristic, (field_name, weight) in characteristics.items():
         if characteristic == 'Login Hour':
@@ -288,7 +289,7 @@ def perform_analysis(df, user_ids, alert_event):
                 field_series = user_history[field_name]
             else:
                 field_series = pd.Series()
- 
+
         used_before, usage_count, usage_percentage = calculate_usage_count_and_percentage(field_series, alert_value)
         detailed_findings[characteristic] = {
             'used_before': used_before,
@@ -297,12 +298,12 @@ def perform_analysis(df, user_ids, alert_event):
             'weight': weight
         }
         risk_score_components[characteristic] = 0 if used_before else weight
- 
+
     # Calculate total risk score
     total_risk_score = sum(risk_score_components.values())
     max_possible_score = sum(weight for _, weight in characteristics.values())
     risk_percentage = (total_risk_score / max_possible_score) * 100
- 
+
     # Determine risk level
     thresholds = config['thresholds']
     if risk_percentage == 0:
@@ -313,28 +314,28 @@ def perform_analysis(df, user_ids, alert_event):
         risk_level = 'High Risk'
     else:
         risk_level = 'Critical Risk'
- 
+
     conclusion = config['risk_level_recommendations'][risk_level]
- 
+
     # Display findings
     display_analysis_results(alert_event_mapped, detailed_findings, total_events, risk_percentage, risk_level, conclusion)
- 
+
     # Perform anomaly detection
     perform_anomaly_detection(user_history, alert_event_mapped)
- 
+
     # Visualizations
     visualize_data(user_history, alert_event_mapped)
- 
+
     # Export to Excel
     export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion)
- 
+
 def calculate_usage_count_and_percentage(user_history_field, alert_value):
     counts = user_history_field.value_counts()
     usage_count = counts.get(alert_value, 0)
     usage_percentage = (usage_count / len(user_history_field)) * 100 if len(user_history_field) > 0 else 0
     used_before = usage_count > 0
     return used_before, usage_count, usage_percentage
- 
+
 def display_analysis_results(alert_event, detailed_findings, total_events, risk_percentage, risk_level, conclusion):
     thresholds = config['thresholds']
     user_ids = alert_event['user_ids']
@@ -347,18 +348,18 @@ def display_analysis_results(alert_event, detailed_findings, total_events, risk_
         usage_info = f"Used {int(data['usage_count'])} times ({data['usage_percentage']:.2f}% of logins)"
         weight_info = f"Weight: {data['weight']}%"
         display(Markdown(f"- **{characteristic}** ({weight_info})\n  - **Seen Before:** {status}\n  - **{usage_info}**\n"))
-     
+    
     # Output the risk score and thresholds
     display(Markdown(f"**Total Risk Score:** {risk_percentage:.2f}% (on a scale from 0 to 100%)"))
     display(Markdown(f"**Risk Level:** {risk_level}\n"))
     display(Markdown("**Risk Thresholds:**"))
     for level, (lower, upper) in thresholds.items():
         display(Markdown(f"- **{level}:** {lower}% - {upper}% Risk"))
-     
+    
     # Output the conclusion
     display(Markdown(f"\n**Conclusion:** {conclusion}"))
     display(Markdown(f"**Recommendation:** {config['risk_level_recommendations'][risk_level]}"))
- 
+
 def perform_anomaly_detection(user_history, alert_event):
     display(Markdown("\n**Anomaly Detection:**"))
     if len(user_history) > 1:
@@ -370,17 +371,17 @@ def perform_anomaly_detection(user_history, alert_event):
             z_scores = np.abs(stats.zscore(login_hours))
             threshold = 2
             anomalies = login_hours[z_scores > threshold]
-             
+            
             alert_hour = alert_event['timestamp'].hour
             alert_hour_z_score = np.abs((alert_hour - login_hours.mean()) / login_hours.std())
-             
+            
             if alert_hour_z_score > threshold:
                 display(Markdown(f"- The login hour **{alert_hour}** is anomalous compared to the user's historical login hours."))
             else:
                 display(Markdown(f"- The login hour **{alert_hour}** is within the normal range."))
     else:
         display(Markdown("- Not enough data for anomaly detection."))
- 
+
 def visualize_data(user_history, alert_event):
     # Visualize login hours
     if len(user_history) > 0:
@@ -397,7 +398,7 @@ def visualize_data(user_history, alert_event):
         plt.show()
     else:
         display(Markdown("**No historical data available for visualization.**"))
- 
+
 def export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion):
     # Prepare data for export
     df_export = pd.DataFrame.from_dict(detailed_findings, orient='index')
@@ -406,7 +407,7 @@ def export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion):
     df_export['Risk Score (%)'] = risk_percentage
     df_export['Risk Level'] = risk_level
     df_export['Conclusion'] = conclusion
- 
+
     # Export to Excel
     output_file = 'authentication_analysis_results.xlsx'
     try:
@@ -414,3 +415,4 @@ def export_to_excel(detailed_findings, risk_percentage, risk_level, conclusion):
         display(Markdown(f"\n**Results have been exported to '{output_file}'.**"))
     except Exception as e:
         display(Markdown(f"\n**Error exporting results to Excel:** {e}"))
+
