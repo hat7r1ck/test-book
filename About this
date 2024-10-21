@@ -1,0 +1,109 @@
+# Authentication Analysis Notebook
+
+This notebook is designed to analyze authentication events by comparing the event's attributes with historical data. It calculates a risk score based on various characteristics and provides recommendations based on the risk level.
+
+## Table of Contents
+1. [Introduction](#introduction)
+2. [Requirements](#requirements)
+3. [How to Use](#how-to-use)
+4. [Risk Score Calculation](#risk-score-calculation)
+5. [Risk Levels and Recommendations](#risk-levels-and-recommendations)
+6. [Conclusion](#conclusion)
+
+## Introduction
+
+The **Authentication Analysis Notebook** assists in identifying unusual authentication events by evaluating specific characteristics (e.g., `Source IP`, `Device ID`, `User Agent`) and comparing them to historical login data. Based on the comparison, the notebook generates a risk score and categorizes the event into a risk level with actionable recommendations.
+
+## Requirements
+
+To use this notebook, you will need the following:
+
+- Python 3.x
+- Jupyter Notebook or Jupyter Lab
+- Required Python libraries:
+  - `pandas`
+  - `numpy`
+  - `seaborn`
+  - `scipy`
+  - `matplotlib`
+  - `ipywidgets`
+
+To install the necessary dependencies, run the following commands:
+
+```bash
+pip install pandas numpy seaborn scipy matplotlib ipywidgets
+```
+
+## How to Use
+
+1. **Load Data:**
+   - Input the path to a CSV file containing historical login data.
+   
+2. **Enter Alert Event Details:**
+   - Fill in the alert event fields using the provided form in the notebook.
+   - Event attributes include `Source IP`, `User Agent`, `Device ID`, etc.
+
+3. **Analyze:**
+   - After filling in the fields, click the **Analyze** button to generate the risk score and view detailed findings.
+
+## Risk Score Calculation
+
+The **Total Risk Score** is determined by assessing the historical usage of specific characteristics related to the authentication event. If a characteristic has been used by the user in the past, it contributes nothing to the risk score. If it hasn’t been used before, the weight of the characteristic is added to the score.
+
+### Characteristics
+The characteristics used to calculate the risk score are:
+- Source IP Address
+- Device ID
+- User Agent
+- Login Hour
+- Authentication Type
+- Authentication Result
+- Location (Country, State)
+- Application
+- Carrier Name
+
+### Formula
+
+1. **Total Risk Score:**  
+   The total risk score is the sum of the contributions of each characteristic:
+
+   ```markdown
+   $$ \text{Total Risk Score} = \sum (\text{Contribution of each characteristic}) $$
+   ```
+
+2. **Risk Percentage:**  
+   The risk percentage is calculated based on the maximum possible score, which is the sum of all characteristic weights:
+
+   ```markdown
+   $$ \text{Risk Percentage} = \left( \frac{\text{Total Risk Score}}{\text{Maximum Possible Score}} \right) \times 100\% $$
+   ```
+
+For example, if the maximum possible score is 100, and the total risk score is 40:
+
+```markdown
+$$ \text{Risk Percentage} = \left( \frac{40}{100} \right) \times 100 = 40\% $$
+```
+
+## Risk Levels and Recommendations
+
+The risk percentage is mapped to a risk level as follows:
+
+- **Low Risk (0-20%)**:
+  - **Conclusion:** The authentication event appears legitimate based on historical data.
+  - **Recommendation:** No immediate action is required.
+
+- **Moderate Risk (21-50%)**:
+  - **Conclusion:** The authentication event is somewhat unusual compared to historical patterns.
+  - **Recommendation:** Review the event for potential anomalies.
+
+- **High Risk (51-85%)**:
+  - **Conclusion:** The authentication event contains unique indicators without historical confirmation of legitimacy.
+  - **Recommendation:** Reset the user's password and MFA tokens to prevent unauthorized access.
+
+- **Critical Risk (86-100%)**:
+  - **Conclusion:** The authentication event poses a significant security threat.
+  - **Recommendation:** Reset the user's password and MFA tokens immediately, escalate to the Incident Response (IR) team for further investigation.
+
+## Conclusion
+
+The **Authentication Analysis Notebook** provides a structured approach to assess the legitimacy of authentication events in SOC environments. By leveraging historical data to generate risk scores, it enables security analysts to make informed decisions on the appropriate response to potential threats. This tool is designed to assist SOC teams in triaging alerts and providing actionable recommendations based on data-driven analysis.
