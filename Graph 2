@@ -1,0 +1,46 @@
+def visualize_auth_attempts(user_history, alert_event):
+    # Ensure there are authentication results to analyze
+    if 'authentication_result' not in user_history.columns or user_history.empty:
+        display(Markdown("**No authentication result data available for visualization.**"))
+        return
+
+    # Filter for allowed vs blocked authentications
+    allowed_auth = user_history[user_history['authentication_result'] == 'allowed']
+    blocked_auth = user_history[user_history['authentication_result'] == 'blocked']
+    
+    # Group by hour and count attempts
+    allowed_count = allowed_auth.groupby(user_history['timestamp'].dt.hour).size()
+    blocked_count = blocked_auth.groupby(user_history['timestamp'].dt.hour).size()
+
+    # Combine allowed and blocked counts into a DataFrame
+    df_auth = pd.DataFrame({'Allowed': allowed_count, 'Blocked': blocked_count}).fillna(0)
+
+    # Plot the authentication attempts by hour
+    plt.figure(figsize=(12, 6))
+    sns.lineplot(data=df_auth, marker='o')
+    plt.title(f"Allowed vs Blocked Authentications for User(s) '{', '.join(alert_event['user_ids'])}'", fontsize=14)
+    plt.xlabel('Hour of Day', fontsize=12)
+    plt.ylabel('Number of Authentications', fontsize=12)
+    plt.grid(True)
+
+    # Highlight potential brute force attack spikes using z-scores
+    df_auth['Blocked_zscore'] = np.abs(stats.zscore(df_auth['Blocked']))
+    df_auth['Allowed_zscore'] = np.abs(stats.zscore(df_auth['Allowed']))
+
+    # Use a threshold to highlight anomalies (e.g., z-score > 2)
+    brute_force_attempts = df_auth[(df_auth['Blocked_zscore'] > 2) | (df_auth['Allowed_zscore'] > 2)]
+    for index, row in brute_force_attempts.iterrows():
+        plt.axvline(x=index, color='red', linestyle='--', label=f'Potential Anomaly at {index}:00')
+
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    # Display any anomalies
+    if not brute_force_attempts.empty:
+        display(Markdown(f"**Potential Brute Force Attack Detected at:**"))
+        for index, row in brute_force_attempts.iterrows():
+            display(Markdown(f"- Hour: {index}:00 - Allowed: {row['Allowed']}, Blocked: {row['Blocked']}"))
+
+    else:
+        display(Markdown("**No significant anomalies detected in authentication attempts.**"))
