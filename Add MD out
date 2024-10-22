@@ -1,0 +1,50 @@
+def display_analysis_results(alert_event, detailed_findings, total_events, risk_percentage, risk_level, conclusion):
+    thresholds = config['thresholds']
+    user_ids = alert_event['user_ids']
+    user_ids_display = ', '.join(user_ids) if len(user_ids) > 1 else user_ids[0]
+    
+    # Rendered output (existing)
+    display(Markdown("\n**Detailed Analysis of Alert Event Compared to User's Historical Data:**\n"))
+    display(Markdown(f"**Total number of historical logins for user(s) '{user_ids_display}': {total_events}**\n"))
+    display(Markdown("**Characteristic Analysis:**"))
+    
+    for characteristic, data in detailed_findings.items():
+        status = 'Yes' if data['used_before'] else 'No'
+        usage_info = f"Used {int(data['usage_count'])} times ({data['usage_percentage']:.2f}% of logins)"
+        weight_info = f"Weight: {data['weight']}%"
+        display(Markdown(f"- **{characteristic}** ({weight_info})\n  - **Seen Before:** {status}\n  - **{usage_info}**\n"))
+    
+    display(Markdown(f"**Total Risk Score:** {risk_percentage:.2f}% (on a scale from 0 to 100%)"))
+    display(Markdown(f"**Risk Level:** {risk_level}\n"))
+    display(Markdown("**Risk Thresholds:**"))
+    
+    for level, (lower, upper) in thresholds.items():
+        display(Markdown(f"- **{level}:** {lower}% - {upper}% Risk"))
+    
+    display(Markdown(f"\n**Conclusion:** {conclusion}"))
+    display(Markdown(f"**Recommendation:** {config['risk_level_recommendations'][risk_level]}"))
+
+    # Add unrendered markdown output (new addition)
+    raw_md = []
+    raw_md.append(f"**Detailed Analysis of Alert Event Compared to User's Historical Data:**\n")
+    raw_md.append(f"**Total number of historical logins for user(s) '{user_ids_display}': {total_events}**\n")
+    raw_md.append("**Characteristic Analysis:**\n")
+    
+    for characteristic, data in detailed_findings.items():
+        status = 'Yes' if data['used_before'] else 'No'
+        usage_info = f"Used {int(data['usage_count'])} times ({data['usage_percentage']:.2f}% of logins)"
+        weight_info = f"Weight: {data['weight']}%"
+        raw_md.append(f"- **{characteristic}** ({weight_info})\n  - **Seen Before:** {status}\n  - **{usage_info}**\n")
+    
+    raw_md.append(f"**Total Risk Score:** {risk_percentage:.2f}% (on a scale from 0 to 100%)\n")
+    raw_md.append(f"**Risk Level:** {risk_level}\n")
+    raw_md.append("**Risk Thresholds:**\n")
+    
+    for level, (lower, upper) in thresholds.items():
+        raw_md.append(f"- **{level}:** {lower}% - {upper}% Risk\n")
+    
+    raw_md.append(f"\n**Conclusion:** {conclusion}\n")
+    raw_md.append(f"**Recommendation:** {config['risk_level_recommendations'][risk_level]}\n")
+
+    # Print raw markdown so you can copy-paste it into your case notes
+    print("\n".join(raw_md))
