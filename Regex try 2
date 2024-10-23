@@ -8,95 +8,62 @@ import ipywidgets as widgets
 import io
 from os import path
 from difflib import SequenceMatcher
+from ipyfilechooser import FileChooser
 
 # Placeholder for the dataframe
 df = None
 
-# CSV Upload Widget
-upload_widget = widgets.FileUpload(
-    accept='.csv',  # Accept CSV files
-    multiple=False  # Only one file at a time
+# File chooser widget
+file_chooser = FileChooser(
+    use_dir_icons=True,
+    filter_pattern='*.csv',
+    show_only_dirs=False
 )
 
-# Column selector widget with width adjustment for better visibility
-column_selector = widgets.Dropdown(
-    options=[],  # To be populated with column names after upload
-    description="Select Column:",
-    style={'description_width': 'initial'},
-    layout=widgets.Layout(width='50%'),
-    disabled=True  # Disabled until CSV is loaded
-)
-
-# Regex Library Selector
-regex_library_selector = widgets.Dropdown(
-    options=['-- Select from Library --'],  # To be populated with library patterns
-    description="Regex Library (Optional):",
-    style={'description_width': 'initial'},
-    layout=widgets.Layout(width='50%'),
-)
-
-# Create a text input widget for the regex pattern
-regex_input = widgets.Text(
-    value='',
-    description='Custom Regex Pattern (Optional):',
-    style={'description_width': 'initial'},
-    layout=widgets.Layout(width='50%')
-)
-
-# Button to trigger regex tool after column selection
-run_button = widgets.Button(
-    description="Run Regex Tool",
+# Button to load CSV
+load_button = widgets.Button(
+    description="Load CSV",
     button_style='primary',
     layout=widgets.Layout(width='20%'),
-    disabled=True  # Disabled until a column is selected
 )
 
-# Output area for displaying messages
-output = widgets.Output()
-
 # Display the widgets
-display(upload_widget)
+display(file_chooser)
+display(load_button)
 display(column_selector)
-display(Markdown("**Optional:** You may provide a custom regex pattern or select one from the library. If left blank, the tool will automatically generate a regex pattern based on the data analysis."))
+display(Markdown("**Optional:** You may provide a custom regex pattern or select one from the library..."))
 display(regex_library_selector)
 display(regex_input)
 display(run_button)
 display(output)
 
-# Function to handle the CSV upload
-def handle_upload(change):
-    global df
+# Function to trigger the regex tool when the button is clicked
+def run_regex_tool(b):
     with output:
         output.clear_output()  # Clear previous messages
-        display("Processing CSV file... Please wait.")
-        
-        # Check if a file was uploaded
-        if not upload_widget.value:
-            display("No file uploaded.")
-            return
-        
         try:
-            # Since FileUpload allows multiple files, iterate through them
-            for filename, file_info in upload_widget.value.items():
-                display(f"Processing file: {filename}")
-                content = file_info['content']
+            if df is not None and column_selector.value:
+                selected_column = column_selector.value
+                display(f"Running regex tool on column: {selected_column}")
                 
-                # Read the CSV into a pandas DataFrame
-                df = pd.read_csv(io.BytesIO(content))
-                display("CSV file content preview:")
-                display(df.head())  # Show a preview of the DataFrame for debugging purposes
+                user_pattern = None
+                if regex_input.value.strip():
+                    user_pattern = regex_input.value.strip()
+                elif regex_library_selector.value != '-- Select from Library --':
+                    user_pattern = regex_input.value.strip()
                 
-                # Populate the column selector with the dataframe's columns
-                column_selector.options = df.columns.tolist()
-                column_selector.disabled = False  # Enable the column selector
-                run_button.disabled = True  # Disable the run button until a column is selected
-                display("CSV file loaded successfully. Select a column from the dropdown.")
-                break  # Only process the first file
+                regex_tool(df, selected_column, user_pattern)
+            else:
+                if df is None:
+                    display("Please upload a valid CSV file.")
+                else:
+                    display("Please select a column from the dropdown.")
         except Exception as e:
-            display(f"Error loading CSV file: {str(e)}")
+            display(f"An error occurred: {str(e)}")
 
-# Attach the function to the upload widget
-upload_widget.observe(handle_upload, names='value')  # Use 'value' instead of 'data'
+
+# Attach the function to the load button
+load_button.on_click(load_csv)
 
 # Update the button state based on column selection
 def handle_column_selection(change):
