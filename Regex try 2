@@ -2,36 +2,19 @@
 import re
 import pandas as pd
 from IPython.display import display, HTML
-import Levenshtein
-import time
 import ipywidgets as widgets
-import io
 from ipyfilechooser import FileChooser
-import string
 from collections import defaultdict
+import itertools
 
 # Placeholder for the DataFrame
 df = None
 
-# Define dark mode styles for better visibility
+# Define styles for better visibility
 style = {'description_width': 'initial'}
-dark_layout = widgets.Layout(
-    width='50%',
-    background_color='#2D2D2D',
-    color='#FFFFFF',
-    border='1px solid #444444'
-)
-button_layout = widgets.Layout(
-    width='20%',
-    background_color='#2D2D2D',
-    color='#FFFFFF',
-    border='1px solid #444444'
-)
-button_style = {
-    'button_color': '#2D2D2D',
-    'font_weight': 'bold',
-    'font_color': '#FFFFFF'
-}
+layout = widgets.Layout(width='50%')
+button_layout = widgets.Layout(width='20%')
+button_style = 'primary'
 
 # File chooser widget
 file_chooser = FileChooser(
@@ -44,7 +27,7 @@ file_chooser = FileChooser(
 load_button = widgets.Button(
     description="Load CSV",
     layout=button_layout,
-    style=button_style
+    button_style=button_style
 )
 
 # Column selector widget
@@ -52,7 +35,7 @@ column_selector = widgets.Dropdown(
     options=[],  # To be populated with column names after loading CSV
     description="Select Column:",
     style=style,
-    layout=dark_layout,
+    layout=layout,
     disabled=True  # Disabled until CSV is loaded
 )
 
@@ -61,7 +44,7 @@ regex_library_selector = widgets.Dropdown(
     options=['-- Select from Library --'],  # Will be populated later
     description="Regex Library (Optional):",
     style=style,
-    layout=dark_layout,
+    layout=layout,
 )
 
 # Text input widget for the regex pattern
@@ -69,23 +52,23 @@ regex_input = widgets.Text(
     value='',
     description='Custom Regex Pattern (Optional):',
     style=style,
-    layout=dark_layout,
+    layout=layout,
 )
 
 # Button to trigger the regex tool
 run_button = widgets.Button(
     description="Run Regex Tool",
     layout=button_layout,
-    style=button_style
+    button_style='success'
 )
 
 # Output area for displaying messages
-output = widgets.Output(
-    layout=widgets.Layout(background_color='#2D2D2D', color='#FFFFFF')
-)
+output = widgets.Output()
 
-# Replace Markdown with widgets.HTML for compatibility with VBox
-optional_text = widgets.HTML("<span style='color:#FFFFFF;'>**Optional:** You may provide a custom regex pattern or select one from the library...</span>")
+# Instructional text
+optional_text = widgets.Label(
+    "Optional: You may provide a custom regex pattern or select one from the library..."
+)
 
 # Display the widgets in a vertical box
 display(widgets.VBox([
@@ -101,9 +84,8 @@ display(widgets.VBox([
 
 # Feature: Built-in Regex Library (common regex patterns)
 built_in_regex_library = {
-    # Add your regex patterns here
     'Email Address': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
-    # ... (other patterns as needed)
+    # Add more patterns as needed
 }
 
 # Update regex_library_selector options
@@ -125,20 +107,16 @@ def load_csv(b):
         output.clear_output()
         file_path = file_chooser.selected
         if not file_path:
-            display(widgets.HTML("<span style='color:#FFFFFF;'>Please select a CSV file.</span>"))
+            display("Please select a CSV file.")
             return
         try:
-            display(widgets.HTML(f"<span style='color:#FFFFFF;'>Loading CSV file from: {file_path}</span>"))
+            display(f"Loading CSV file from: {file_path}")
             df = pd.read_csv(file_path)
-            display(widgets.HTML("<span style='color:#FFFFFF;'>CSV file content preview:</span>"))
-            # Display the DataFrame in a scrollable output
-            from IPython.display import HTML
-
-            # Convert the DataFrame to HTML with scrollable styling
+            display("CSV file content preview:")
             def display_scrollable_dataframe(df):
                 html = df.to_html()
                 scrollable_div = f'''
-                <div style="overflow-x: auto; max-width: 100%; color: #FFFFFF;">
+                <div style="overflow-x: auto; max-width: 100%;">
                     {html}
                 </div>
                 '''
@@ -149,9 +127,9 @@ def load_csv(b):
             column_selector.options = df.columns.tolist()
             column_selector.disabled = False  # Enable the column selector
             run_button.disabled = True  # Disable the run button until a column is selected
-            display(widgets.HTML("<span style='color:#FFFFFF;'>CSV file loaded successfully. Select a column from the dropdown.</span>"))
+            display("CSV file loaded successfully. Select a column from the dropdown.")
         except Exception as e:
-            display(widgets.HTML(f"<span style='color:#FFFFFF;'>Error loading CSV file: {str(e)}</span>"))
+            display(f"Error loading CSV file: {str(e)}")
 
 # Attach the function to the load button
 load_button.on_click(load_csv)
@@ -162,176 +140,96 @@ def handle_column_selection(change):
         output.clear_output()
         if column_selector.value:
             run_button.disabled = False  # Enable the run button
-            display(widgets.HTML(f"<span style='color:#FFFFFF;'>Column '{column_selector.value}' selected. You can now run the regex tool.</span>"))
+            display(f"Column '{column_selector.value}' selected. You can now run the regex tool.")
         else:
             run_button.disabled = True
 
 # Attach the column selection observer
 column_selector.observe(handle_column_selection, names='value')
 
-# Feature: Pattern History & Versioning
-pattern_history = []
+# Function to infer regex pattern from examples using pairwise alignment
+def infer_regex_from_examples(examples):
+    # Use pairwise alignment to find common patterns
+    def longest_common_subsequence(s1, s2):
+        m = len(s1)
+        n = len(s2)
+        dp = [["" for x in range(n+1)] for x in range(m+1)]
+        for i in range(m):
+            for j in range(n):
+                if s1[i] == s2[j]:
+                    dp[i+1][j+1] = dp[i][j] + s1[i]
+                else:
+                    dp[i+1][j+1] = dp[i+1][j] if len(dp[i+1][j]) > len(dp[i][j+1]) else dp[i][j+1]
+        return dp[m][n]
 
-def save_pattern_version(pattern):
-    pattern_history.append(pattern)
+    # Start with the first example
+    common_subseq = examples[0]
+    for example in examples[1:]:
+        common_subseq = longest_common_subsequence(common_subseq, example)
+        if not common_subseq:
+            break
 
-# Function to explain regex patterns
-def explain_regex(pattern):
-    explanation = []
-    # Simple explanations for basic regex components
-    if '^' in pattern:
-        explanation.append("`^`: Matches the start of the string.")
-    if '$' in pattern:
-        explanation.append("`$`: Matches the end of the string.")
-    if r'\d' in pattern:
-        explanation.append(r"`\d`: Matches any digit (0-9).")
-    if r'\w' in pattern:
-        explanation.append(r"`\w`: Matches any word character (letters, digits, underscore).")
-    if r'\s' in pattern:
-        explanation.append(r"`\s`: Matches any whitespace character.")
-    if '.' in pattern and not r'\.' in pattern:
-        explanation.append("`. (dot)`: Matches any character except newline.")
-    if '+' in pattern:
-        explanation.append("`+`: Matches 1 or more of the preceding element.")
-    if '*' in pattern:
-        explanation.append("`*`: Matches 0 or more of the preceding element.")
-    if '?' in pattern:
-        explanation.append("`?`: Matches 0 or 1 of the preceding element.")
-    if '[' in pattern and ']' in pattern:
-        explanation.append("`[...]`: Character class, matches any one of the characters inside the brackets.")
-    if '{' in pattern and '}' in pattern:
-        explanation.append("`{m,n}`: Quantifier, matches between m and n occurrences of the preceding element.")
-    # Add more explanations as needed
-    return "\n".join(explanation)
-
-# Feature: Levenshtein-based approximate matching
-def levenshtein_approximate_match(unmatched_data, matched_data, threshold=0.8):
-    matched, unmatched = [], []
-    for value in unmatched_data:
-        # Find the closest match in matched_data
-        closest_similarity = 0
-        for match_value in matched_data:
-            distance = Levenshtein.distance(value, match_value)
-            max_len = max(len(value), len(match_value))
-            similarity = 1 - (distance / max_len) if max_len > 0 else 0
-            if similarity > closest_similarity:
-                closest_similarity = similarity
-        if closest_similarity >= threshold:
-            matched.append(value)
-        else:
-            unmatched.append(value)
-    return matched, unmatched
-
-# Sandbox Feature: Safe environment for testing regex patterns
-def sandbox_environment(pattern, test_data):
-    display(widgets.HTML("<span style='color:#FFFFFF;'>**Testing Regex in Sandbox Environment:**</span>"))
-    for value in test_data[:5]:  # Limit output to first 5 entries
-        match = re.fullmatch(pattern, value)
-        if match:
-            display(widgets.HTML(f"<span style='color:#FFFFFF;'>Value: {value} --> Matched: {match.group(0)}</span>"))
-        else:
-            display(widgets.HTML(f"<span style='color:#FFFFFF;'>Value: {value} --> No Match</span>"))
-
-def provide_feedback(data, pattern):
-    matched = [row for row in data if re.fullmatch(pattern, row)]
-    unmatched = [row for row in data if not re.fullmatch(pattern, row)]
-
-    match_percentage = len(matched) / len(data) * 100 if len(data) > 0 else 0
-    feedback = f"Match Percentage: {match_percentage:.2f}%\n"
-
-    if match_percentage < 80:
-        feedback += "Suggestions:\n"
-        feedback += "- Consider refining the pattern or reviewing unmatched data for inconsistencies.\n"
-
-    return feedback, matched, unmatched
-
-# Interactive buttons for pattern adjustment and copying to clipboard
-def interactive_buttons(optimized_pattern):
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>**Regex Pattern:** `{optimized_pattern}`</span>"))
-    # Provide alternative instructions if the button doesn't work
-    display(widgets.HTML("<span style='color:#FFFFFF;'>Copy the regex pattern manually if the button doesn't work.</span>"))
-
-# Enhanced regex generator function using n-gram analysis
-def generate_smart_regex(column_data, ngram_range=(3, 5), frequency_threshold=0.5, max_pattern_length=200):
-    unique_values = [s for s in set(column_data) if s]
-    total_strings = len(unique_values)
-    if total_strings == 0:
-        return '.*'
-
-    ngram_freq = defaultdict(int)
-
-    # Extract n-grams from each string
-    for s in unique_values:
-        s_len = len(s)
-        ngrams_in_s = set()
-        for n in range(ngram_range[0], ngram_range[1] + 1):
-            for i in range(s_len - n + 1):
-                ngram = s[i:i + n]
-                ngrams_in_s.add(ngram)
-        for ngram in ngrams_in_s:
-            ngram_freq[ngram] += 1
-
-    # Identify common n-grams based on frequency threshold
-    common_ngrams = [ngram for ngram, count in ngram_freq.items() if count / total_strings >= frequency_threshold]
-
-    if not common_ngrams:
-        # Fallback to a generic pattern if no common n-grams are found
-        min_len = min(len(s) for s in unique_values)
-        max_len = max(len(s) for s in unique_values)
+    if not common_subseq:
+        # If there's no common subsequence, fallback to generic pattern
+        min_len = min(len(s) for s in examples)
+        max_len = max(len(s) for s in examples)
         return '^.{%d,%d}$' % (min_len, max_len)
 
-    # Sort n-grams by length and frequency
-    common_ngrams.sort(key=lambda x: (-len(x), -ngram_freq[x]))
+    # Build regex pattern by replacing variable parts with appropriate patterns
+    regex_parts = []
+    last_pos = 0
+    for match in re.finditer(re.escape(common_subseq), examples[0]):
+        start, end = match.span()
+        # Variable part before the match
+        if start > last_pos:
+            var_part = examples[0][last_pos:start]
+            regex_parts.append(pattern_for_variable_part(var_part, examples, last_pos, start))
+        # Fixed part (common subsequence)
+        regex_parts.append(re.escape(examples[0][start:end]))
+        last_pos = end
+    # Variable part after the last match
+    if last_pos < len(examples[0]):
+        var_part = examples[0][last_pos:]
+        regex_parts.append(pattern_for_variable_part(var_part, examples, last_pos, len(examples[0])))
 
-    # Build the regex pattern using the most significant n-grams
-    pattern_parts = []
-    for ngram in common_ngrams[:5]:  # Limit to top 5 n-grams to control pattern length
-        pattern_parts.append(re.escape(ngram))
-
-    # Build the final pattern
-    pattern = '.*'.join(pattern_parts)
-    pattern = '^.*' + pattern + '.*$'
-
-    # Ensure pattern length is within limits
-    if len(pattern) > max_pattern_length:
-        # Simplify pattern by using fewer n-grams
-        pattern = '^.*' + '.*'.join(pattern_parts[:3]) + '.*$'
-
+    pattern = '^' + ''.join(regex_parts) + '$'
     return pattern
 
-# Function to perform data profiling (optional)
-def data_profiling(column_data):
-    # Calculate length statistics
-    lengths = column_data.str.len()
-    length_stats = lengths.describe()
-
-    # Character frequency
-    all_chars = ''.join(column_data.tolist())
-    char_counts = pd.Series(list(all_chars)).value_counts().head(20)
-
-    # Common prefixes and suffixes
-    prefixes = column_data.str[:5]
-    suffixes = column_data.str[-5:]
-    common_prefixes = prefixes.value_counts().head(10)
-    common_suffixes = suffixes.value_counts().head(10)
-
-    # Display results
-    display(widgets.HTML("<span style='color:#FFFFFF;'>### Data Profiling Results</span>"))
-    display(widgets.HTML("<span style='color:#FFFFFF;'>**Length Statistics:**</span>"))
-    display(length_stats.to_frame())
-    display(widgets.HTML("<span style='color:#FFFFFF;'>**Top 20 Most Frequent Characters:**</span>"))
-    display(char_counts.to_frame())
-    display(widgets.HTML("<span style='color:#FFFFFF;'>**Top 10 Common Prefixes (first 5 characters):**</span>"))
-    display(common_prefixes.to_frame())
-    display(widgets.HTML("<span style='color:#FFFFFF;'>**Top 10 Common Suffixes (last 5 characters):**</span>"))
-    display(common_suffixes.to_frame())
+def pattern_for_variable_part(fixed_part, examples, start_idx, end_idx):
+    # Analyze the variable part across all examples
+    var_parts = [s[start_idx:end_idx] for s in examples]
+    if all(part.isdigit() for part in var_parts):
+        # All digits
+        lengths = [len(part) for part in var_parts]
+        if min(lengths) == max(lengths):
+            return r'\d{' + str(lengths[0]) + '}'
+        else:
+            return r'\d{' + str(min(lengths)) + ',' + str(max(lengths)) + '}'
+    elif all(part.isalpha() for part in var_parts):
+        # All letters
+        lengths = [len(part) for part in var_parts]
+        if min(lengths) == max(lengths):
+            return r'[a-zA-Z]{' + str(lengths[0]) + '}'
+        else:
+            return r'[a-zA-Z]{' + str(min(lengths)) + ',' + str(max(lengths)) + '}'
+    elif all(part.isalnum() for part in var_parts):
+        # Alphanumeric
+        lengths = [len(part) for part in var_parts]
+        if min(lengths) == max(lengths):
+            return r'\w{' + str(lengths[0]) + '}'
+        else:
+            return r'\w{' + str(min(lengths)) + ',' + str(max(lengths)) + '}'
+    else:
+        # Mixed characters
+        lengths = [len(part) for part in var_parts]
+        return r'.{' + str(min(lengths)) + ',' + str(max(lengths)) + '}'
 
 # Define the main function to integrate all the functionality
 def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
-    column_data = data[column_name].astype(str)
+    column_data = data[column_name].astype(str).tolist()
 
-    # Generate the regex pattern using the improved function
-    auto_generated_pattern = generate_smart_regex(column_data)
+    # Generate the regex pattern using the advanced function
+    auto_generated_pattern = infer_regex_from_examples(column_data)
 
     # Determine which pattern to use
     if user_pattern:
@@ -341,44 +239,23 @@ def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
         initial_pattern = auto_generated_pattern
         pattern_source = "Automatically generated pattern"
 
-    # Save pattern version
-    save_pattern_version(initial_pattern)
-
-    # Measure performance
-    performance_metrics = measure_performance(initial_pattern, column_data)
-
     # Provide feedback based on initial pattern
     feedback, matched, unmatched = provide_feedback(column_data, initial_pattern)
 
     # Generate interactive output
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>**{pattern_source}:** `{initial_pattern}`</span>"))
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>**Regex Explanation:**<br>{explain_regex(initial_pattern)}</span>"))
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>**Matched Rows:** {len(matched)}</span>"))
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>**Unmatched Rows:** {len(unmatched)}</span>"))
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>**Feedback:**<br>{feedback}</span>"))
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>**Performance Metrics:**</span>"))
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>- Processing Time: {performance_metrics['processing_time']:.4f} seconds</span>"))
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>- Matches: {performance_metrics['match_count']}</span>"))
-    display(widgets.HTML(f"<span style='color:#FFFFFF;'>- Coverage: {performance_metrics['coverage_percentage']:.2f}%</span>"))
+    display(f"**{pattern_source}:** `{initial_pattern}`")
+    display(f"**Regex Explanation:**\n{explain_regex(initial_pattern)}")
+    display(f"**Matched Rows:** {len(matched)}")
+    display(f"**Unmatched Rows:** {len(unmatched)}")
+    display(f"**Feedback:**\n{feedback}")
 
     # If a user pattern was provided, offer the auto-generated pattern as a suggestion
     if user_pattern:
-        display(widgets.HTML(f"<span style='color:#FFFFFF;'>**Auto-Generated Pattern Suggestion:** `{auto_generated_pattern}`</span>"))
-        display(widgets.HTML(f"<span style='color:#FFFFFF;'>**Auto-Generated Pattern Explanation:**<br>{explain_regex(auto_generated_pattern)}</span>"))
-        # Interactive adjustment buttons
+        display(f"**Auto-Generated Pattern Suggestion:** `{auto_generated_pattern}`")
+        display(f"**Auto-Generated Pattern Explanation:**\n{explain_regex(auto_generated_pattern)}")
         interactive_buttons(auto_generated_pattern)
     else:
-        # Interactive adjustment buttons
         interactive_buttons(initial_pattern)
-
-    # Levenshtein approximate matching suggestions
-    if len(unmatched) > 0 and len(matched) > 0:
-        approx_matched, approx_unmatched = levenshtein_approximate_match(unmatched, matched, threshold)
-        display(widgets.HTML("<span style='color:#FFFFFF;'>**Approximate Matching:**</span>"))
-        display(widgets.HTML(f"<span style='color:#FFFFFF;'>Matched via Levenshtein (Threshold {threshold}): {len(approx_matched)}</span>"))
-        display(widgets.HTML(f"<span style='color:#FFFFFF;'>Remaining Unmatched: {len(approx_unmatched)}</span>"))
-    else:
-        display(widgets.HTML("<span style='color:#FFFFFF;'>**No approximate matches could be found.**</span>"))
 
     # Sandbox feature
     if len(unmatched) > 0:
@@ -408,6 +285,35 @@ def measure_performance(pattern, data):
         "coverage_percentage": coverage_percentage
     }
 
+# Function to provide feedback
+def provide_feedback(data, pattern):
+    matched = [row for row in data if re.fullmatch(pattern, row)]
+    unmatched = [row for row in data if not re.fullmatch(pattern, row)]
+
+    match_percentage = len(matched) / len(data) * 100 if len(data) > 0 else 0
+    feedback = f"Match Percentage: {match_percentage:.2f}%\n"
+
+    if match_percentage < 80:
+        feedback += "Suggestions:\n"
+        feedback += "- Consider refining the pattern or reviewing unmatched data for inconsistencies.\n"
+
+    return feedback, matched, unmatched
+
+# Interactive buttons for pattern adjustment and copying to clipboard
+def interactive_buttons(optimized_pattern):
+    display(f"**Regex Pattern:** `{optimized_pattern}`")
+    display("Copy the regex pattern manually if needed.")
+
+# Sandbox Feature: Safe environment for testing regex patterns
+def sandbox_environment(pattern, test_data):
+    display("**Testing Regex in Sandbox Environment:**")
+    for value in test_data[:5]:  # Limit output to first 5 entries
+        match = re.fullmatch(pattern, value)
+        if match:
+            display(f"Value: {value} --> Matched: {match.group(0)}")
+        else:
+            display(f"Value: {value} --> No Match")
+
 # Function to trigger the regex tool when the button is clicked
 def run_regex_tool(b):
     with output:
@@ -416,17 +322,14 @@ def run_regex_tool(b):
             if df is not None and column_selector.value:
                 selected_column = column_selector.value
                 column_data = df[selected_column].astype(str)
-                display(widgets.HTML(f"<span style='color:#FFFFFF;'>Running regex tool on column: {selected_column}</span>"))
-
-                # Data profiling (optional, can be commented out if not needed)
-                # data_profiling(column_data)
+                display(f"Running regex tool on column: {selected_column}")
 
                 user_pattern = regex_input.value.strip() if regex_input.value.strip() else None
                 regex_tool(df, selected_column, user_pattern)
             else:
-                display(widgets.HTML("<span style='color:#FFFFFF;'>Please load a valid CSV file and select a column.</span>"))
+                display("Please load a valid CSV file and select a column.")
         except Exception as e:
-            display(widgets.HTML(f"<span style='color:#FFFFFF;'>An error occurred: {str(e)}</span>"))
+            display(f"An error occurred: {str(e)}")
 
 # Attach the function to the run button
 run_button.on_click(run_regex_tool)
