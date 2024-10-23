@@ -183,38 +183,45 @@ def explain_regex(pattern):
     explanation = []
     # Simple explanations for basic regex components
     if '^' in pattern:
-        explanation.append("Matches the start of the string.")
+        explanation.append("`^`: Matches the start of the string.")
     if '$' in pattern:
-        explanation.append("Matches the end of the string.")
+        explanation.append("`$`: Matches the end of the string.")
     if r'\d' in pattern:
-        explanation.append("Matches any digit (0-9).")
+        explanation.append(r"`\d`: Matches any digit (0-9).")
     if r'\w' in pattern:
-        explanation.append("Matches any word character (letters, digits, underscore).")
+        explanation.append(r"`\w`: Matches any word character (letters, digits, underscore).")
     if r'\s' in pattern:
-        explanation.append("Matches any whitespace character.")
+        explanation.append(r"`\s`: Matches any whitespace character.")
     if '.' in pattern:
-        explanation.append("Matches any character except newline.")
+        explanation.append("`. (dot)`: Matches any character except newline.")
     if '+' in pattern:
-        explanation.append("Matches 1 or more of the preceding element.")
+        explanation.append("`+`: Matches 1 or more of the preceding element.")
     if '*' in pattern:
-        explanation.append("Matches 0 or more of the preceding element.")
+        explanation.append("`*`: Matches 0 or more of the preceding element.")
     if '?' in pattern:
-        explanation.append("Matches 0 or 1 of the preceding element.")
+        explanation.append("`?`: Matches 0 or 1 of the preceding element.")
     if '[' in pattern and ']' in pattern:
-        explanation.append("Character class: matches any one of the characters inside the brackets.")
+        explanation.append("`[...]`: Character class, matches any one of the characters inside the brackets.")
     if '{' in pattern and '}' in pattern:
-        explanation.append("Quantifier: matches a specified number of occurrences of the preceding element.")
+        explanation.append("`{m,n}`: Quantifier, matches between m and n occurrences of the preceding element.")
     # Add more explanations as needed
     return "\n".join(explanation)
 
 # Feature: Levenshtein-based approximate matching
-def levenshtein_approximate_match(data, pattern, threshold=0.8):
+def levenshtein_approximate_match(unmatched_data, matched_data, threshold=0.8):
     matched, unmatched = [], []
-    for value in data:
-        distance = Levenshtein.distance(value, pattern)
-        max_len = max(len(value), len(pattern))
-        similarity = 1 - (distance / max_len) if max_len > 0 else 0
-        if similarity >= threshold:
+    for value in unmatched_data:
+        # Find the closest match in matched_data
+        closest_distance = None
+        closest_match = None
+        for match_value in matched_data:
+            distance = Levenshtein.distance(value, match_value)
+            max_len = max(len(value), len(match_value))
+            similarity = 1 - (distance / max_len) if max_len > 0 else 0
+            if closest_distance is None or similarity > closest_distance:
+                closest_distance = similarity
+                closest_match = match_value
+        if closest_distance >= threshold:
             matched.append(value)
         else:
             unmatched.append(value)
@@ -224,7 +231,7 @@ def levenshtein_approximate_match(data, pattern, threshold=0.8):
 def sandbox_environment(pattern, test_data):
     display(Markdown("**Testing Regex in Sandbox Environment:**"))
     for value in test_data[:5]:  # Limit output to first 5 entries
-        match = re.search(pattern, value)
+        match = re.fullmatch(pattern, value)
         if match:
             display(f"Value: {value} --> Matched: {match.group(0)}")
         else:
@@ -366,14 +373,17 @@ def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
         interactive_buttons(initial_pattern)
 
     # Levenshtein approximate matching suggestions
-    if len(unmatched) > 0:
-        approx_matched, approx_unmatched = levenshtein_approximate_match(unmatched, initial_pattern, threshold)
+    if len(unmatched) > 0 and len(matched) > 0:
+        approx_matched, approx_unmatched = levenshtein_approximate_match(unmatched, matched, threshold)
         display(Markdown(f"**Approximate Matching:**\n"))
         display(Markdown(f"Matched via Levenshtein (Threshold {threshold}): {len(approx_matched)}\n"))
         display(Markdown(f"Remaining Unmatched: {len(approx_unmatched)}"))
+    else:
+        display(Markdown("**No approximate matches could be found.**"))
 
     # Sandbox feature
-    sandbox_environment(initial_pattern, unmatched)
+    if len(unmatched) > 0:
+        sandbox_environment(initial_pattern, unmatched)
 
 # Function to measure regex performance
 def measure_performance(pattern, data):
