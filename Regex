@@ -21,14 +21,16 @@ column_selector = widgets.Dropdown(
     options=[],  # To be populated with column names after upload
     description="Select Column:",
     style={'description_width': 'initial'},
-    layout=widgets.Layout(width='50%')
+    layout=widgets.Layout(width='50%'),
+    disabled=True  # Disabled until CSV is loaded
 )
 
 # Button to trigger regex tool after column selection
 run_button = widgets.Button(
     description="Run Regex Tool",
     button_style='primary',
-    layout=widgets.Layout(width='20%')
+    layout=widgets.Layout(width='20%'),
+    disabled=True  # Disabled until a column is selected
 )
 
 # Output area for displaying messages
@@ -39,25 +41,26 @@ def handle_upload(change):
     global df
     with output:
         output.clear_output()  # Clear previous messages
-        # Get the uploaded file
-        uploaded_file = upload_widget.value
-        if uploaded_file:
-            file_name = next(iter(uploaded_file))
-            if not file_name.endswith('.csv'):
-                print("Error: The selected file is not a CSV. Please upload a CSV file.")
-            else:
-                content = uploaded_file[file_name]['content']
-                try:
-                    # Read the CSV into a pandas DataFrame
-                    df = pd.read_csv(io.StringIO(content.decode('utf-8')))
-                    # Populate the column selector with the dataframe's columns
-                    column_selector.options = df.columns.tolist()
-                    print("CSV file loaded successfully. Columns populated.")
-                    print(f"Columns available: {df.columns.tolist()}")
-                except Exception as e:
-                    print(f"Error loading CSV file: {str(e)}")
-        else:
+        print("Processing CSV file... Please wait.")
+        
+        # Check if a file was uploaded
+        if not upload_widget.value:
             print("No file uploaded.")
+            return
+        
+        uploaded_file = list(upload_widget.value.values())[0]
+        content = uploaded_file['content']
+        
+        try:
+            # Read the CSV into a pandas DataFrame
+            df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+            # Populate the column selector with the dataframe's columns
+            column_selector.options = df.columns.tolist()
+            column_selector.disabled = False  # Enable the column selector
+            run_button.disabled = True  # Disable the run button until a column is selected
+            print("CSV file loaded successfully. Columns are ready for selection.")
+        except Exception as e:
+            print(f"Error loading CSV file: {str(e)}")
 
 # Attach the function to the upload widget
 upload_widget.observe(handle_upload, names='value')
@@ -87,6 +90,12 @@ def handle_column_selection(change):
         print(f"Column '{column_selector.value}' selected. You can now run the regex tool.")
     else:
         run_button.disabled = True
+
+# Attach the column selection observer
+column_selector.observe(handle_column_selection, names='value')
+
+# Attach the function to the button
+run_button.on_click(run_regex_tool)
 
 # Feature: Context-Aware Regex Suggestions (tree-based analysis for substrings, prefixes, suffixes)
 def generate_optimized_regex(column_data):
