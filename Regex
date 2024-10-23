@@ -5,6 +5,7 @@ from IPython.display import display, HTML, Markdown
 import Levenshtein
 import time
 import ipywidgets as widgets
+import io
 
 # Placeholder for the dataframe
 df = None
@@ -47,10 +48,12 @@ def handle_upload(change):
             else:
                 content = uploaded_file[file_name]['content']
                 try:
-                    df = pd.read_csv(pd.compat.StringIO(content.decode('utf-8')))
+                    # Read the CSV into a pandas DataFrame
+                    df = pd.read_csv(io.StringIO(content.decode('utf-8')))
                     # Populate the column selector with the dataframe's columns
                     column_selector.options = df.columns.tolist()
-                    print("CSV file loaded and columns populated.")
+                    print("CSV file loaded successfully. Columns populated.")
+                    print(f"Columns available: {df.columns.tolist()}")
                 except Exception as e:
                     print(f"Error loading CSV file: {str(e)}")
         else:
@@ -69,7 +72,10 @@ def run_regex_tool(b):
             # Call your regex_tool function here
             regex_tool(df, selected_column, r'\d{3}')
         else:
-            print("Please upload a CSV file and select a column.")
+            if df is None:
+                print("Please upload a valid CSV file.")
+            else:
+                print("Please select a column from the dropdown.")
 
 # Feature: Context-Aware Regex Suggestions (tree-based analysis for substrings, prefixes, suffixes)
 def generate_optimized_regex(column_data):
