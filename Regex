@@ -6,9 +6,70 @@ import Levenshtein
 import time
 import ipywidgets as widgets
 
+# Placeholder for the dataframe
+df = None
+
 # CSV Upload Widget
-upload_widget = widgets.FileUpload(accept='.csv', multiple=False)
-column_selector = widgets.Dropdown(description="Select Column:", disabled=True)
+upload_widget = widgets.FileUpload(
+    accept='.csv',  # Accept CSV files
+    multiple=False  # Only one file at a time
+)
+
+# Column selector widget with width adjustment for better visibility
+column_selector = widgets.Dropdown(
+    options=[],  # To be populated with column names after upload
+    description="Select Column:",
+    style={'description_width': 'initial'},
+    layout=widgets.Layout(width='50%')
+)
+
+# Button to trigger regex tool after column selection
+run_button = widgets.Button(
+    description="Run Regex Tool",
+    button_style='primary',
+    layout=widgets.Layout(width='20%')
+)
+
+# Output area for displaying messages
+output = widgets.Output()
+
+# Function to handle the CSV upload
+def handle_upload(change):
+    global df
+    with output:
+        output.clear_output()  # Clear previous messages
+        # Get the uploaded file
+        uploaded_file = upload_widget.value
+        if uploaded_file:
+            file_name = next(iter(uploaded_file))
+            if not file_name.endswith('.csv'):
+                print("Error: The selected file is not a CSV. Please upload a CSV file.")
+            else:
+                content = uploaded_file[file_name]['content']
+                try:
+                    df = pd.read_csv(pd.compat.StringIO(content.decode('utf-8')))
+                    # Populate the column selector with the dataframe's columns
+                    column_selector.options = df.columns.tolist()
+                    print("CSV file loaded and columns populated.")
+                except Exception as e:
+                    print(f"Error loading CSV file: {str(e)}")
+        else:
+            print("No file uploaded.")
+
+# Attach the function to the upload widget
+upload_widget.observe(handle_upload, names='value')
+
+# Function to trigger the regex tool when the column is selected and button is clicked
+def run_regex_tool(b):
+    with output:
+        output.clear_output()  # Clear previous messages
+        if df is not None and column_selector.value:
+            selected_column = column_selector.value
+            print(f"Running regex tool on column: {selected_column}")
+            # Call your regex_tool function here
+            regex_tool(df, selected_column, r'\d{3}')
+        else:
+            print("Please upload a CSV file and select a column.")
 
 # Feature: Context-Aware Regex Suggestions (tree-based analysis for substrings, prefixes, suffixes)
 def generate_optimized_regex(column_data):
@@ -99,9 +160,6 @@ def handle_column_selection(change):
 
 upload_widget.observe(handle_upload, names='value')
 column_selector.observe(handle_column_selection, names='value')
-
-# Display the upload widget and column selector
-display(upload_widget, column_selector)
 
 # Feature: Pattern History & Versioning
 pattern_history = []
@@ -248,9 +306,8 @@ def regex_tool(data, column_name, initial_pattern, threshold=0.8):
     # Sandbox feature
     sandbox_environment(initial_pattern, unmatched)
 
-# Example Usage
-# Assuming we have a DataFrame with a column 'data_column' containing text to match against
-data = pd.DataFrame({
-    'data_column': ["abc123", "def456", "ghi789", "abc124", "xyz987"]
-})
-regex_tool(data, 'data_column', r'\d{3}')
+# Attach the function to the button
+run_button.on_click(run_regex_tool)
+
+# Display the widgets
+display(upload_widget, column_selector, run_button, output)
