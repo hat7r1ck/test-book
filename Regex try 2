@@ -52,34 +52,45 @@ run_button = widgets.Button(
 # Output area for displaying messages
 output = widgets.Output()
 
+# Display the widgets
+display(upload_widget)
+display(column_selector)
+display(Markdown("**Optional:** You may provide a custom regex pattern or select one from the library. If left blank, the tool will automatically generate a regex pattern based on the data analysis."))
+display(regex_library_selector)
+display(regex_input)
+display(run_button)
+display(output)
+
 # Function to handle the CSV upload
 def handle_upload(change):
     global df
     with output:
         output.clear_output()  # Clear previous messages
-        print("Processing CSV file... Please wait.")
+        display("Processing CSV file... Please wait.")
         
         # Check if a file was uploaded
         if not upload_widget.value:
-            print("No file uploaded.")
+            display("No file uploaded.")
             return
         
-        uploaded_file = list(upload_widget.value.values())[0]
-        content = uploaded_file['content']
-        
         try:
-            # Read the CSV into a pandas DataFrame
-            df = pd.read_csv(io.StringIO(content.decode('utf-8')))
-            print("CSV file content preview:")
-            print(df.head())  # Show a preview of the DataFrame for debugging purposes
-            
-            # Populate the column selector with the dataframe's columns
-            column_selector.options = df.columns.tolist()
-            column_selector.disabled = False  # Enable the column selector
-            run_button.disabled = True  # Disable the run button until a column is selected
-            print("CSV file loaded successfully. Select a column from the dropdown.")
+            # Since FileUpload allows multiple files, iterate through them
+            for filename, file_info in upload_widget.value.items():
+                content = file_info['content']
+                
+                # Read the CSV into a pandas DataFrame
+                df = pd.read_csv(io.BytesIO(content))
+                display("CSV file content preview:")
+                display(df.head())  # Show a preview of the DataFrame for debugging purposes
+                
+                # Populate the column selector with the dataframe's columns
+                column_selector.options = df.columns.tolist()
+                column_selector.disabled = False  # Enable the column selector
+                run_button.disabled = True  # Disable the run button until a column is selected
+                display("CSV file loaded successfully. Select a column from the dropdown.")
+                break  # Only process the first file
         except Exception as e:
-            print(f"Error loading CSV file: {str(e)}")
+            display(f"Error loading CSV file: {str(e)}")
 
 # Attach the function to the upload widget
 upload_widget.observe(handle_upload, names='value')
@@ -89,7 +100,7 @@ def handle_column_selection(change):
     with output:
         if column_selector.value:
             run_button.disabled = False  # Enable the run button
-            print(f"Column '{column_selector.value}' selected. You can now run the regex tool.")
+            display(f"Column '{column_selector.value}' selected. You can now run the regex tool.")
         else:
             run_button.disabled = True
 
@@ -115,12 +126,12 @@ def generate_optimized_regex(column_data):
     def longest_common_substring(data):
         substr = ''
         if len(data) > 1 and len(data[0]) > 0:
-            for i in range(len(data[0])):
-                for j in range(len(data[0])-i+1):
-                    if j > len(substr):
-                        candidate = data[0][i:i+j]
-                        if all(candidate in x for x in data):
-                            substr = candidate
+            substr = data[0]
+            for s in data[1:]:
+                match = SequenceMatcher(None, substr, s).find_longest_match(0, len(substr), 0, len(s))
+                substr = substr[match.a: match.a + match.size]
+                if not substr:
+                    break
         return substr
 
     # Find common prefix
@@ -345,7 +356,7 @@ def run_regex_tool(b):
         output.clear_output()  # Clear previous messages
         if df is not None and column_selector.value:
             selected_column = column_selector.value
-            print(f"Running regex tool on column: {selected_column}")
+            display(f"Running regex tool on column: {selected_column}")
             
             user_pattern = None
             if regex_input.value.strip():
@@ -356,18 +367,9 @@ def run_regex_tool(b):
             regex_tool(df, selected_column, user_pattern)
         else:
             if df is None:
-                print("Please upload a valid CSV file.")
+                display("Please upload a valid CSV file.")
             else:
-                print("Please select a column from the dropdown.")
+                display("Please select a column from the dropdown.")
 
 # Attach the function to the button
 run_button.on_click(run_regex_tool)
-
-# Display the widgets
-display(upload_widget)
-display(column_selector)
-display(Markdown("**Optional:** You may provide a custom regex pattern or select one from the library. If left blank, the tool will automatically generate a regex pattern based on the data analysis."))
-display(regex_library_selector)
-display(regex_input)
-display(run_button)
-display(output)
