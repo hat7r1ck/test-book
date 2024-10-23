@@ -9,6 +9,7 @@ import io
 from os import path
 from difflib import SequenceMatcher
 from ipyfilechooser import FileChooser
+import string
 
 # Placeholder for the DataFrame
 df = None
@@ -73,133 +74,6 @@ display(regex_input)
 display(run_button)
 display(output)
 
-# Function to load CSV from selected file
-def load_csv(b):
-    global df
-    with output:
-        output.clear_output()
-        file_path = file_chooser.selected
-        if not file_path:
-            display("Please select a CSV file.")
-            return
-        try:
-            display(f"Loading CSV file from: {file_path}")
-            df = pd.read_csv(file_path)
-            display("CSV file content preview:")
-            display(df.head())
-            # Populate the column selector with the DataFrame's columns
-            column_selector.options = df.columns.tolist()
-            column_selector.disabled = False  # Enable the column selector
-            run_button.disabled = True  # Disable the run button until a column is selected
-            display("CSV file loaded successfully. Select a column from the dropdown.")
-        except Exception as e:
-            display(f"Error loading CSV file: {str(e)}")
-
-# Attach the function to the load button
-load_button.on_click(load_csv)
-
-# Update the button state based on column selection
-def handle_column_selection(change):
-    with output:
-        output.clear_output()
-        if column_selector.value:
-            run_button.disabled = False  # Enable the run button
-            display(f"Column '{column_selector.value}' selected. You can now run the regex tool.")
-        else:
-            run_button.disabled = True
-
-# Attach the column selection observer
-column_selector.observe(handle_column_selection, names='value')
-
-# Feature: Built-in Regex Library (common regex patterns)
-built_in_regex_library = {
-    'Email Address': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
-    'IPv4 Address': r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b',
-    # Add more patterns as needed
-}
-
-# Update regex_library_selector options
-regex_library_selector.options = ['-- Select from Library --'] + list(built_in_regex_library.keys())
-
-# Update regex_input based on library selection
-def handle_regex_library_selection(change):
-    if regex_library_selector.value != '-- Select from Library --':
-        regex_input.value = built_in_regex_library[regex_library_selector.value]
-    else:
-        regex_input.value = ''
-
-regex_library_selector.observe(handle_regex_library_selection, names='value')
-
-# Feature: Context-Aware Regex Suggestions (tree-based analysis for substrings, prefixes, suffixes)
-def generate_optimized_regex(column_data):
-    # Identify common substrings, prefixes, and suffixes
-
-    # Find the longest common substring among all the data in the column
-    def longest_common_substring(data):
-        substr = ''
-        if len(data) > 1 and len(data[0]) > 0:
-            substr = data[0]
-            for s in data[1:]:
-                match = SequenceMatcher(None, substr, s).find_longest_match(0, len(substr), 0, len(s))
-                substr = substr[match.a: match.a + match.size]
-                if not substr:
-                    break
-        return substr
-
-    # Find common prefix
-    def common_prefix(strings):
-        if not strings:
-            return ''
-        prefix = strings[0]
-        for s in strings[1:]:
-            prefix = path.commonprefix([prefix, s])
-            if not prefix:
-                break
-        return prefix
-
-    # Find common suffix
-    def common_suffix(strings):
-        if not strings:
-            return ''
-        reversed_strings = [s[::-1] for s in strings]
-        reversed_suffix = common_prefix(reversed_strings)
-        return reversed_suffix[::-1]
-
-    data_list = column_data.tolist()
-    prefix = common_prefix(data_list)
-    suffix = common_suffix(data_list)
-    substring = longest_common_substring(data_list)
-
-    # Build regex pattern
-    pattern = ''
-    if prefix:
-        pattern += re.escape(prefix)
-        pattern += '.*'
-    if substring and substring not in prefix and substring not in suffix:
-        pattern += re.escape(substring)
-        pattern += '.*'
-    if suffix and suffix not in prefix:
-        pattern += re.escape(suffix)
-
-    if not pattern:
-        # If no commonality is found, return a pattern that matches any string
-        pattern = '.*'
-
-    return pattern
-
-# Feature: Regex Performance Metrics
-def measure_performance(pattern, data):
-    start_time = time.time()
-    matches = [re.search(pattern, value) for value in data]
-    end_time = time.time()
-    processing_time = end_time - start_time
-    match_count = sum([1 for match in matches if match])
-    return {
-        "processing_time": processing_time,
-        "match_count": match_count,
-        "coverage_percentage": (match_count / len(data)) * 100
-    }
-
 # Feature: Built-in Regex Library (common regex patterns)
 built_in_regex_library = {
     'Email Address': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',  # Matches email addresses
@@ -238,27 +112,109 @@ built_in_regex_library = {
 # Update regex_library_selector options
 regex_library_selector.options = ['-- Select from Library --'] + list(built_in_regex_library.keys())
 
+# Function to update regex_input based on library selection
+def handle_regex_library_selection(change):
+    if regex_library_selector.value != '-- Select from Library --':
+        regex_input.value = built_in_regex_library[regex_library_selector.value]
+    else:
+        regex_input.value = ''
+
+regex_library_selector.observe(handle_regex_library_selection, names='value')
+
+# Function to load CSV from selected file
+def load_csv(b):
+    global df
+    with output:
+        output.clear_output()
+        file_path = file_chooser.selected
+        if not file_path:
+            display("Please select a CSV file.")
+            return
+        try:
+            display(f"Loading CSV file from: {file_path}")
+            df = pd.read_csv(file_path)
+            display("CSV file content preview:")
+            # Display the DataFrame in a scrollable output
+            from IPython.display import HTML
+
+            # Convert the DataFrame to HTML with scrollable styling
+            def display_scrollable_dataframe(df):
+                html = df.to_html()
+                scrollable_div = f'''
+                <div style="overflow-x: auto; max-width: 100%;">
+                    {html}
+                </div>
+                '''
+                display(HTML(scrollable_div))
+
+            display_scrollable_dataframe(df.head())  # Show a preview of the DataFrame
+            # Populate the column selector with the DataFrame's columns
+            column_selector.options = df.columns.tolist()
+            column_selector.disabled = False  # Enable the column selector
+            run_button.disabled = True  # Disable the run button until a column is selected
+            display("CSV file loaded successfully. Select a column from the dropdown.")
+        except Exception as e:
+            display(f"Error loading CSV file: {str(e)}")
+
+# Attach the function to the load button
+load_button.on_click(load_csv)
+
+# Update the button state based on column selection
+def handle_column_selection(change):
+    with output:
+        output.clear_output()
+        if column_selector.value:
+            run_button.disabled = False  # Enable the run button
+            display(f"Column '{column_selector.value}' selected. You can now run the regex tool.")
+        else:
+            run_button.disabled = True
+
+# Attach the column selection observer
+column_selector.observe(handle_column_selection, names='value')
+
 # Feature: Pattern History & Versioning
 pattern_history = []
 
 def save_pattern_version(pattern):
     pattern_history.append(pattern)
 
-# Feature: Regex Debugger (step-by-step matching)
-def debug_regex(pattern, data):
-    for value in data:
-        match = re.search(pattern, value)
-        if match:
-            print(f"Value: {value} --> Matched: {match.group(0)}")
-        else:
-            print(f"Value: {value} --> No Match")
+# Function to explain regex patterns
+def explain_regex(pattern):
+    explanation = []
+    # Simple explanations for basic regex components
+    if '^' in pattern:
+        explanation.append("Matches the start of the string.")
+    if '$' in pattern:
+        explanation.append("Matches the end of the string.")
+    if r'\d' in pattern:
+        explanation.append("Matches any digit (0-9).")
+    if r'\w' in pattern:
+        explanation.append("Matches any word character (letters, digits, underscore).")
+    if r'\s' in pattern:
+        explanation.append("Matches any whitespace character.")
+    if '.' in pattern:
+        explanation.append("Matches any character except newline.")
+    if '+' in pattern:
+        explanation.append("Matches 1 or more of the preceding element.")
+    if '*' in pattern:
+        explanation.append("Matches 0 or more of the preceding element.")
+    if '?' in pattern:
+        explanation.append("Matches 0 or 1 of the preceding element.")
+    if '[' in pattern and ']' in pattern:
+        explanation.append("Character class: matches any one of the characters inside the brackets.")
+    if '{' in pattern and '}' in pattern:
+        explanation.append("Quantifier: matches a specified number of occurrences of the preceding element.")
+    # Add more explanations as needed
+    return "\n".join(explanation)
 
 # Feature: Levenshtein-based approximate matching
 def levenshtein_approximate_match(data, pattern, threshold=0.8):
     matched, unmatched = [], []
     for value in data:
-        ratio = Levenshtein.ratio(value, pattern)
-        if ratio >= threshold:
+        distance = Levenshtein.distance(value, pattern)
+        max_len = max(len(value), len(pattern))
+        similarity = 1 - (distance / max_len) if max_len > 0 else 0
+        if similarity >= threshold:
             matched.append(value)
         else:
             unmatched.append(value)
@@ -266,40 +222,26 @@ def levenshtein_approximate_match(data, pattern, threshold=0.8):
 
 # Sandbox Feature: Safe environment for testing regex patterns
 def sandbox_environment(pattern, test_data):
-    print("Testing Regex in Sandbox Environment:")
-    debug_regex(pattern, test_data)
+    display(Markdown("**Testing Regex in Sandbox Environment:**"))
+    for value in test_data[:5]:  # Limit output to first 5 entries
+        match = re.search(pattern, value)
+        if match:
+            display(f"Value: {value} --> Matched: {match.group(0)}")
+        else:
+            display(f"Value: {value} --> No Match")
 
 def provide_feedback(data, pattern):
-    matched = [row for row in data if re.search(pattern, row)]
-    unmatched = [row for row in data if not re.search(pattern, row)]
-    
-    match_percentage = len(matched) / len(data) * 100
+    matched = [row for row in data if re.fullmatch(pattern, row)]
+    unmatched = [row for row in data if not re.fullmatch(pattern, row)]
+
+    match_percentage = len(matched) / len(data) * 100 if data else 0
     feedback = f"Match Percentage: {match_percentage:.2f}%\n"
-    
+
     if match_percentage < 80:
         feedback += "Suggestions:\n"
         feedback += "- Consider refining the pattern or reviewing unmatched data for inconsistencies.\n"
-    
-    return feedback, matched, unmatched
 
-def explain_regex(pattern):
-    explanation = []
-    if re.search(r'\d', pattern):
-        explanation.append("Matches digit characters (0-9).")
-    if re.search(r'\w', pattern):
-        explanation.append("Matches word characters (a-z, A-Z, 0-9, _).")
-    if re.search(r'\s', pattern):
-        explanation.append("Matches whitespace characters.")
-    if re.search(r'\b', pattern):
-        explanation.append("Matches word boundaries.")
-    if re.search(r'[A-Z]', pattern):
-        explanation.append("Matches uppercase letters.")
-    if re.search(r'[a-z]', pattern):
-        explanation.append("Matches lowercase letters.")
-    if re.search(r'\.', pattern):
-        explanation.append("Matches any character.")
-    # Add more explanations as needed
-    return "\n".join(explanation)
+    return feedback, matched, unmatched
 
 # Interactive buttons for pattern adjustment and copying to clipboard
 def interactive_buttons(optimized_pattern):
@@ -307,13 +249,84 @@ def interactive_buttons(optimized_pattern):
     # Provide alternative instructions if the button doesn't work
     display(Markdown("Copy the regex pattern manually if the button doesn't work."))
 
+# Enhanced regex generator function
+def generate_smart_regex(column_data):
+    unique_values = [s for s in set(column_data) if s]
+    if not unique_values:
+        return '.*'  # Return a generic pattern if data is empty
+
+    # Find minimum and maximum string lengths
+    min_len = min(len(s) for s in unique_values)
+    max_len = max(len(s) for s in unique_values)
+
+    # Initialize pattern components
+    pattern_parts = []
+
+    for i in range(max_len):
+        chars_at_pos = set()
+        for s in unique_values:
+            if i < len(s):
+                chars_at_pos.add(s[i])
+            else:
+                chars_at_pos.add(None)
+
+        chars_at_pos.discard(None)
+        if not chars_at_pos:
+            # Position exceeds all string lengths
+            break
+
+        if len(chars_at_pos) == 1:
+            # Fixed character
+            char = chars_at_pos.pop()
+            pattern_parts.append(re.escape(char))
+        else:
+            # Variable character, determine character class
+            char_class = ''
+
+            if all(c.isdigit() for c in chars_at_pos):
+                char_class = r'\d'
+            elif all(c.isalpha() for c in chars_at_pos):
+                if all(c.islower() for c in chars_at_pos):
+                    char_class = r'[a-z]'
+                elif all(c.isupper() for c in chars_at_pos):
+                    char_class = r'[A-Z]'
+                else:
+                    char_class = r'[a-zA-Z]'
+            elif all(c in string.punctuation for c in chars_at_pos):
+                # Special characters
+                escaped_chars = ''.join(re.escape(c) for c in chars_at_pos)
+                char_class = f'[{escaped_chars}]'
+            else:
+                # Mixed character types
+                escaped_chars = ''.join(re.escape(c) for c in chars_at_pos)
+                char_class = f'[{escaped_chars}]'
+
+            pattern_parts.append(char_class)
+
+    # Handle variable string lengths
+    if min_len != max_len:
+        # Add optional pattern parts
+        pattern = ''
+        for idx, part in enumerate(pattern_parts):
+            if all(len(s) > idx for s in unique_values):
+                pattern += part
+            else:
+                pattern += f'(?:{part})?'
+    else:
+        pattern = ''.join(pattern_parts)
+
+    # Add anchors
+    pattern = '^' + pattern + '$'
+
+    return pattern
+
 # Define the main function to integrate all the functionality
 def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
     column_data = data[column_name].astype(str)
-    
-    # Generate optimized regex automatically
-    auto_generated_pattern = generate_optimized_regex(column_data)
-    
+
+    # Generate the regex pattern using the improved function
+    auto_generated_pattern = generate_smart_regex(column_data)
+
     # Determine which pattern to use
     if user_pattern:
         initial_pattern = user_pattern
@@ -324,13 +337,13 @@ def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
 
     # Save pattern version
     save_pattern_version(initial_pattern)
-    
+
     # Measure performance
     performance_metrics = measure_performance(initial_pattern, column_data)
-    
+
     # Provide feedback based on initial pattern
     feedback, matched, unmatched = provide_feedback(column_data, initial_pattern)
-    
+
     # Generate interactive output
     display(Markdown(f"**{pattern_source}:** `{initial_pattern}`"))
     display(Markdown(f"**Regex Explanation:**\n{explain_regex(initial_pattern)}"))
@@ -341,7 +354,7 @@ def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
     display(Markdown(f"- Processing Time: {performance_metrics['processing_time']:.4f} seconds"))
     display(Markdown(f"- Matches: {performance_metrics['match_count']}"))
     display(Markdown(f"- Coverage: {performance_metrics['coverage_percentage']:.2f}%"))
-    
+
     # If a user pattern was provided, offer the auto-generated pattern as a suggestion
     if user_pattern:
         display(Markdown(f"**Auto-Generated Pattern Suggestion:** `{auto_generated_pattern}`"))
@@ -351,16 +364,39 @@ def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
     else:
         # Interactive adjustment buttons
         interactive_buttons(initial_pattern)
-    
+
     # Levenshtein approximate matching suggestions
     if len(unmatched) > 0:
         approx_matched, approx_unmatched = levenshtein_approximate_match(unmatched, initial_pattern, threshold)
         display(Markdown(f"**Approximate Matching:**\n"))
         display(Markdown(f"Matched via Levenshtein (Threshold {threshold}): {len(approx_matched)}\n"))
         display(Markdown(f"Remaining Unmatched: {len(approx_unmatched)}"))
-    
+
     # Sandbox feature
     sandbox_environment(initial_pattern, unmatched)
+
+# Function to measure regex performance
+def measure_performance(pattern, data):
+    start_time = time.time()
+    try:
+        compiled_pattern = re.compile(pattern)
+        matches = [compiled_pattern.fullmatch(value) for value in data]
+    except re.error as e:
+        end_time = time.time()
+        return {
+            "processing_time": end_time - start_time,
+            "match_count": 0,
+            "coverage_percentage": 0,
+            "error": str(e)
+        }
+    end_time = time.time()
+    processing_time = end_time - start_time
+    match_count = sum(1 for match in matches if match)
+    return {
+        "processing_time": processing_time,
+        "match_count": match_count,
+        "coverage_percentage": (match_count / len(data)) * 100 if data else 0
+    }
 
 # Function to trigger the regex tool when the button is clicked
 def run_regex_tool(b):
@@ -370,13 +406,13 @@ def run_regex_tool(b):
             if df is not None and column_selector.value:
                 selected_column = column_selector.value
                 display(f"Running regex tool on column: {selected_column}")
-                
+
                 user_pattern = None
                 if regex_input.value.strip():
                     user_pattern = regex_input.value.strip()
                 elif regex_library_selector.value != '-- Select from Library --':
                     user_pattern = regex_input.value.strip()
-                
+
                 regex_tool(df, selected_column, user_pattern)
             else:
                 if df is None:
