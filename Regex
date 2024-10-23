@@ -77,6 +77,9 @@ def run_regex_tool(b):
             else:
                 print("Please select a column from the dropdown.")
 
+# Attach the function to the button
+run_button.on_click(run_regex_tool)
+
 # Update the button state based on column selection
 def handle_column_selection(change):
     if column_selector.value:
