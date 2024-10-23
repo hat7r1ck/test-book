@@ -6,6 +6,8 @@ import Levenshtein
 import time
 import ipywidgets as widgets
 import io
+from os import path
+from difflib import SequenceMatcher
 
 # Placeholder for the dataframe
 df = None
@@ -76,6 +78,7 @@ def handle_upload(change):
         try:
             # Since FileUpload allows multiple files, iterate through them
             for filename, file_info in upload_widget.value.items():
+                display(f"Processing file: {filename}")
                 content = file_info['content']
                 
                 # Read the CSV into a pandas DataFrame
@@ -93,7 +96,7 @@ def handle_upload(change):
             display(f"Error loading CSV file: {str(e)}")
 
 # Attach the function to the upload widget
-upload_widget.observe(handle_upload, names='value')
+upload_widget.observe(handle_upload, names='data')  # Changed from 'value' to 'data'
 
 # Update the button state based on column selection
 def handle_column_selection(change):
