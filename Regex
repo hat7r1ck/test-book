@@ -77,6 +77,14 @@ def run_regex_tool(b):
             else:
                 print("Please select a column from the dropdown.")
 
+# Update the button state based on column selection
+def handle_column_selection(change):
+    if column_selector.value:
+        run_button.disabled = False  # Enable the run button
+        print(f"Column '{column_selector.value}' selected. You can now run the regex tool.")
+    else:
+        run_button.disabled = True
+
 # Feature: Context-Aware Regex Suggestions (tree-based analysis for substrings, prefixes, suffixes)
 def generate_optimized_regex(column_data):
     # Identify common substrings, prefixes, and suffixes using tree-based analysis
