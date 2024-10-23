@@ -6,13 +6,32 @@ import Levenshtein
 import time
 import ipywidgets as widgets
 import io
-from os import path
 from ipyfilechooser import FileChooser
 import string
-from collections import Counter
+from collections import defaultdict
 
 # Placeholder for the DataFrame
 df = None
+
+# Define dark mode styles for better visibility
+style = {'description_width': 'initial'}
+dark_layout = widgets.Layout(
+    width='50%',
+    background_color='#2D2D2D',
+    color='#FFFFFF',
+    border='1px solid #444444'
+)
+button_layout = widgets.Layout(
+    width='20%',
+    background_color='#2D2D2D',
+    color='#FFFFFF',
+    border='1px solid #444444'
+)
+button_style = {
+    'button_color': '#2D2D2D',
+    'font_weight': 'bold',
+    'font_color': '#FFFFFF'
+}
 
 # File chooser widget
 file_chooser = FileChooser(
@@ -24,16 +43,16 @@ file_chooser = FileChooser(
 # Button to load CSV
 load_button = widgets.Button(
     description="Load CSV",
-    button_style='primary',
-    layout=widgets.Layout(width='20%'),
+    layout=button_layout,
+    style=button_style
 )
 
-# Column selector widget with width adjustment for better visibility
+# Column selector widget
 column_selector = widgets.Dropdown(
     options=[],  # To be populated with column names after loading CSV
     description="Select Column:",
-    style={'description_width': 'initial'},
-    layout=widgets.Layout(width='50%'),
+    style=style,
+    layout=dark_layout,
     disabled=True  # Disabled until CSV is loaded
 )
 
@@ -41,38 +60,41 @@ column_selector = widgets.Dropdown(
 regex_library_selector = widgets.Dropdown(
     options=['-- Select from Library --'],  # Will be populated later
     description="Regex Library (Optional):",
-    style={'description_width': 'initial'},
-    layout=widgets.Layout(width='50%'),
+    style=style,
+    layout=dark_layout,
 )
 
 # Text input widget for the regex pattern
 regex_input = widgets.Text(
     value='',
     description='Custom Regex Pattern (Optional):',
-    style={'description_width': 'initial'},
-    layout=widgets.Layout(width='50%'),
+    style=style,
+    layout=dark_layout,
 )
 
 # Button to trigger the regex tool
 run_button = widgets.Button(
     description="Run Regex Tool",
-    button_style='success',
-    layout=widgets.Layout(width='20%'),
-    disabled=True  # Will be enabled after column selection
+    layout=button_layout,
+    style=button_style
 )
 
 # Output area for displaying messages
-output = widgets.Output()
+output = widgets.Output(
+    layout=widgets.Layout(background_color='#2D2D2D', color='#FFFFFF')
+)
 
-# Display the widgets
-display(file_chooser)
-display(load_button)
-display(column_selector)
-display(Markdown("**Optional:** You may provide a custom regex pattern or select one from the library..."))
-display(regex_library_selector)
-display(regex_input)
-display(run_button)
-display(output)
+# Display the widgets in a vertical box
+display(widgets.VBox([
+    file_chooser,
+    load_button,
+    column_selector,
+    Markdown("<span style='color:#FFFFFF;'>**Optional:** You may provide a custom regex pattern or select one from the library...</span>"),
+    regex_library_selector,
+    regex_input,
+    run_button,
+    output
+]))
 
 # Feature: Built-in Regex Library (common regex patterns)
 built_in_regex_library = {
@@ -100,12 +122,12 @@ def load_csv(b):
         output.clear_output()
         file_path = file_chooser.selected
         if not file_path:
-            display("Please select a CSV file.")
+            display(Markdown("<span style='color:#FFFFFF;'>Please select a CSV file.</span>"))
             return
         try:
-            display(f"Loading CSV file from: {file_path}")
+            display(Markdown(f"<span style='color:#FFFFFF;'>Loading CSV file from: {file_path}</span>"))
             df = pd.read_csv(file_path)
-            display("CSV file content preview:")
+            display(Markdown("<span style='color:#FFFFFF;'>CSV file content preview:</span>"))
             # Display the DataFrame in a scrollable output
             from IPython.display import HTML
 
@@ -113,7 +135,7 @@ def load_csv(b):
             def display_scrollable_dataframe(df):
                 html = df.to_html()
                 scrollable_div = f'''
-                <div style="overflow-x: auto; max-width: 100%;">
+                <div style="overflow-x: auto; max-width: 100%; color: #FFFFFF;">
                     {html}
                 </div>
                 '''
@@ -124,9 +146,9 @@ def load_csv(b):
             column_selector.options = df.columns.tolist()
             column_selector.disabled = False  # Enable the column selector
             run_button.disabled = True  # Disable the run button until a column is selected
-            display("CSV file loaded successfully. Select a column from the dropdown.")
+            display(Markdown("<span style='color:#FFFFFF;'>CSV file loaded successfully. Select a column from the dropdown.</span>"))
         except Exception as e:
-            display(f"Error loading CSV file: {str(e)}")
+            display(Markdown(f"<span style='color:#FFFFFF;'>Error loading CSV file: {str(e)}</span>"))
 
 # Attach the function to the load button
 load_button.on_click(load_csv)
@@ -137,7 +159,7 @@ def handle_column_selection(change):
         output.clear_output()
         if column_selector.value:
             run_button.disabled = False  # Enable the run button
-            display(f"Column '{column_selector.value}' selected. You can now run the regex tool.")
+            display(Markdown(f"<span style='color:#FFFFFF;'>Column '{column_selector.value}' selected. You can now run the regex tool.</span>"))
         else:
             run_button.disabled = True
 
@@ -199,13 +221,13 @@ def levenshtein_approximate_match(unmatched_data, matched_data, threshold=0.8):
 
 # Sandbox Feature: Safe environment for testing regex patterns
 def sandbox_environment(pattern, test_data):
-    display(Markdown("**Testing Regex in Sandbox Environment:**"))
+    display(Markdown("<span style='color:#FFFFFF;'>**Testing Regex in Sandbox Environment:**</span>"))
     for value in test_data[:5]:  # Limit output to first 5 entries
         match = re.fullmatch(pattern, value)
         if match:
-            display(f"Value: {value} --> Matched: {match.group(0)}")
+            display(Markdown(f"<span style='color:#FFFFFF;'>Value: {value} --> Matched: {match.group(0)}</span>"))
         else:
-            display(f"Value: {value} --> No Match")
+            display(Markdown(f"<span style='color:#FFFFFF;'>Value: {value} --> No Match</span>"))
 
 def provide_feedback(data, pattern):
     matched = [row for row in data if re.fullmatch(pattern, row)]
@@ -222,54 +244,84 @@ def provide_feedback(data, pattern):
 
 # Interactive buttons for pattern adjustment and copying to clipboard
 def interactive_buttons(optimized_pattern):
-    display(Markdown(f"**Regex Pattern:** `{optimized_pattern}`"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>**Regex Pattern:** `{optimized_pattern}`</span>"))
     # Provide alternative instructions if the button doesn't work
-    display(Markdown("Copy the regex pattern manually if the button doesn't work."))
+    display(Markdown("<span style='color:#FFFFFF;'>Copy the regex pattern manually if the button doesn't work.</span>"))
 
-# Enhanced regex generator function
-def generate_smart_regex(column_data, min_substring_length=3, min_occurrence_ratio=0.5, max_pattern_length=200):
+# Enhanced regex generator function using n-gram analysis
+def generate_smart_regex(column_data, ngram_range=(3, 5), frequency_threshold=0.5, max_pattern_length=200):
     unique_values = [s for s in set(column_data) if s]
-    if not unique_values:
-        return '.*'  # Return a generic pattern if data is empty
-
-    substring_counter = Counter()
     total_strings = len(unique_values)
+    if total_strings == 0:
+        return '.*'
 
-    # Build substring counter
+    ngram_freq = defaultdict(int)
+
+    # Extract n-grams from each string
     for s in unique_values:
-        length = len(s)
-        substrings = set()
-        for i in range(length):
-            for j in range(i + min_substring_length, min(length + 1, i + min_substring_length + 10)):
-                substr = s[i:j]
-                substrings.add(substr)
-        substring_counter.update(substrings)
+        s_len = len(s)
+        ngrams_in_s = set()
+        for n in range(ngram_range[0], ngram_range[1] + 1):
+            for i in range(s_len - n + 1):
+                ngram = s[i:i + n]
+                ngrams_in_s.add(ngram)
+        for ngram in ngrams_in_s:
+            ngram_freq[ngram] += 1
 
-    # Filter substrings that occur in at least min_occurrence_ratio of strings
-    common_substrings = []
-    for substr, count in substring_counter.items():
-        if count / total_strings >= min_occurrence_ratio:
-            common_substrings.append((substr, count))
+    # Identify common n-grams based on frequency threshold
+    common_ngrams = [ngram for ngram, count in ngram_freq.items() if count / total_strings >= frequency_threshold]
 
-    # Sort substrings by length and frequency
-    common_substrings.sort(key=lambda x: (-len(x[0]), -x[1]))
+    if not common_ngrams:
+        # Fallback to a generic pattern if no common n-grams are found
+        min_len = min(len(s) for s in unique_values)
+        max_len = max(len(s) for s in unique_values)
+        return '^.{%d,%d}$' % (min_len, max_len)
 
-    # Build the regex
-    if not common_substrings:
-        # Fallback to generic pattern if no common substrings found
-        return '^.{%d,%d}$' % (min(len(s) for s in unique_values), max(len(s) for s in unique_values))
+    # Sort n-grams by length and frequency
+    common_ngrams.sort(key=lambda x: (-len(x), -ngram_freq[x]))
 
-    # Use the longest common substrings (up to 3)
-    substrings_to_use = [s[0] for s in common_substrings[:3]]
-    pattern = '.*'.join(map(re.escape, substrings_to_use))
+    # Build the regex pattern using the most significant n-grams
+    pattern_parts = []
+    for ngram in common_ngrams[:5]:  # Limit to top 5 n-grams to control pattern length
+        pattern_parts.append(re.escape(ngram))
+
+    # Build the final pattern
+    pattern = '.*'.join(pattern_parts)
     pattern = '^.*' + pattern + '.*$'
 
-    # Ensure pattern is not too long
+    # Ensure pattern length is within limits
     if len(pattern) > max_pattern_length:
-        # Generalize if pattern is too long
-        pattern = '^.{%d,%d}$' % (min(len(s) for s in unique_values), max(len(s) for s in unique_values))
+        # Simplify pattern by using fewer n-grams
+        pattern = '^.*' + '.*'.join(pattern_parts[:3]) + '.*$'
 
     return pattern
+
+# Function to perform data profiling (optional)
+def data_profiling(column_data):
+    # Calculate length statistics
+    lengths = column_data.str.len()
+    length_stats = lengths.describe()
+
+    # Character frequency
+    all_chars = ''.join(column_data.tolist())
+    char_counts = pd.Series(list(all_chars)).value_counts().head(20)
+
+    # Common prefixes and suffixes
+    prefixes = column_data.str[:5]
+    suffixes = column_data.str[-5:]
+    common_prefixes = prefixes.value_counts().head(10)
+    common_suffixes = suffixes.value_counts().head(10)
+
+    # Display results
+    display(Markdown("<span style='color:#FFFFFF;'>### Data Profiling Results</span>"))
+    display(Markdown("<span style='color:#FFFFFF;'>**Length Statistics:**</span>"))
+    display(length_stats.to_frame())
+    display(Markdown("<span style='color:#FFFFFF;'>**Top 20 Most Frequent Characters:**</span>"))
+    display(char_counts.to_frame())
+    display(Markdown("<span style='color:#FFFFFF;'>**Top 10 Common Prefixes (first 5 characters):**</span>"))
+    display(common_prefixes.to_frame())
+    display(Markdown("<span style='color:#FFFFFF;'>**Top 10 Common Suffixes (last 5 characters):**</span>"))
+    display(common_suffixes.to_frame())
 
 # Define the main function to integrate all the functionality
 def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
@@ -296,20 +348,20 @@ def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
     feedback, matched, unmatched = provide_feedback(column_data, initial_pattern)
 
     # Generate interactive output
-    display(Markdown(f"**{pattern_source}:** `{initial_pattern}`"))
-    display(Markdown(f"**Regex Explanation:**\n{explain_regex(initial_pattern)}"))
-    display(Markdown(f"**Matched Rows:** {len(matched)}"))
-    display(Markdown(f"**Unmatched Rows:** {len(unmatched)}"))
-    display(Markdown(f"**Feedback:**\n{feedback}"))
-    display(Markdown(f"**Performance Metrics:**"))
-    display(Markdown(f"- Processing Time: {performance_metrics['processing_time']:.4f} seconds"))
-    display(Markdown(f"- Matches: {performance_metrics['match_count']}"))
-    display(Markdown(f"- Coverage: {performance_metrics['coverage_percentage']:.2f}%"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>**{pattern_source}:** `{initial_pattern}`</span>"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>**Regex Explanation:**\n{explain_regex(initial_pattern)}</span>"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>**Matched Rows:** {len(matched)}</span>"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>**Unmatched Rows:** {len(unmatched)}</span>"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>**Feedback:**\n{feedback}</span>"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>**Performance Metrics:**</span>"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>- Processing Time: {performance_metrics['processing_time']:.4f} seconds</span>"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>- Matches: {performance_metrics['match_count']}</span>"))
+    display(Markdown(f"<span style='color:#FFFFFF;'>- Coverage: {performance_metrics['coverage_percentage']:.2f}%</span>"))
 
     # If a user pattern was provided, offer the auto-generated pattern as a suggestion
     if user_pattern:
-        display(Markdown(f"**Auto-Generated Pattern Suggestion:** `{auto_generated_pattern}`"))
-        display(Markdown(f"**Auto-Generated Pattern Explanation:**\n{explain_regex(auto_generated_pattern)}"))
+        display(Markdown(f"<span style='color:#FFFFFF;'>**Auto-Generated Pattern Suggestion:** `{auto_generated_pattern}`</span>"))
+        display(Markdown(f"<span style='color:#FFFFFF;'>**Auto-Generated Pattern Explanation:**\n{explain_regex(auto_generated_pattern)}</span>"))
         # Interactive adjustment buttons
         interactive_buttons(auto_generated_pattern)
     else:
@@ -319,11 +371,11 @@ def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
     # Levenshtein approximate matching suggestions
     if len(unmatched) > 0 and len(matched) > 0:
         approx_matched, approx_unmatched = levenshtein_approximate_match(unmatched, matched, threshold)
-        display(Markdown(f"**Approximate Matching:**\n"))
-        display(Markdown(f"Matched via Levenshtein (Threshold {threshold}): {len(approx_matched)}\n"))
-        display(Markdown(f"Remaining Unmatched: {len(approx_unmatched)}"))
+        display(Markdown("<span style='color:#FFFFFF;'>**Approximate Matching:**</span>"))
+        display(Markdown(f"<span style='color:#FFFFFF;'>Matched via Levenshtein (Threshold {threshold}): {len(approx_matched)}</span>"))
+        display(Markdown(f"<span style='color:#FFFFFF;'>Remaining Unmatched: {len(approx_unmatched)}</span>"))
     else:
-        display(Markdown("**No approximate matches could be found.**"))
+        display(Markdown("<span style='color:#FFFFFF;'>**No approximate matches could be found.**</span>"))
 
     # Sandbox feature
     if len(unmatched) > 0:
@@ -356,26 +408,22 @@ def measure_performance(pattern, data):
 # Function to trigger the regex tool when the button is clicked
 def run_regex_tool(b):
     with output:
-        output.clear_output()  # Clear previous messages
+        output.clear_output()
         try:
             if df is not None and column_selector.value:
                 selected_column = column_selector.value
-                display(f"Running regex tool on column: {selected_column}")
+                column_data = df[selected_column].astype(str)
+                display(Markdown(f"<span style='color:#FFFFFF;'>Running regex tool on column: {selected_column}</span>"))
 
-                user_pattern = None
-                if regex_input.value.strip():
-                    user_pattern = regex_input.value.strip()
-                elif regex_library_selector.value != '-- Select from Library --':
-                    user_pattern = regex_input.value.strip()
+                # Data profiling (optional, can be commented out if not needed)
+                # data_profiling(column_data)
 
+                user_pattern = regex_input.value.strip() if regex_input.value.strip() else None
                 regex_tool(df, selected_column, user_pattern)
             else:
-                if df is None:
-                    display("Please load a valid CSV file.")
-                else:
-                    display("Please select a column from the dropdown.")
+                display(Markdown("<span style='color:#FFFFFF;'>Please load a valid CSV file and select a column.</span>"))
         except Exception as e:
-            display(f"An error occurred: {str(e)}")
+            display(Markdown(f"<span style='color:#FFFFFF;'>An error occurred: {str(e)}</span>"))
 
 # Attach the function to the run button
 run_button.on_click(run_regex_tool)
