@@ -234,7 +234,7 @@ def provide_feedback(data, pattern):
     matched = [row for row in data if re.fullmatch(pattern, row)]
     unmatched = [row for row in data if not re.fullmatch(pattern, row)]
 
-    match_percentage = len(matched) / len(data) * 100 if data else 0
+    match_percentage = len(matched) / len(data) * 100 if len(data) > 0 else 0
     feedback = f"Match Percentage: {match_percentage:.2f}%\n"
 
     if match_percentage < 80:
@@ -392,10 +392,11 @@ def measure_performance(pattern, data):
     end_time = time.time()
     processing_time = end_time - start_time
     match_count = sum(1 for match in matches if match)
+    coverage_percentage = (match_count / len(data)) * 100 if len(data) > 0 else 0
     return {
         "processing_time": processing_time,
         "match_count": match_count,
-        "coverage_percentage": (match_count / len(data)) * 100 if data else 0
+        "coverage_percentage": coverage_percentage
     }
 
 # Function to trigger the regex tool when the button is clicked
