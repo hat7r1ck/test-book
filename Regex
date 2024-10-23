@@ -54,11 +54,14 @@ def handle_upload(change):
         try:
             # Read the CSV into a pandas DataFrame
             df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+            print("CSV file content preview:")
+            print(df.head())  # Show a preview of the DataFrame for debugging purposes
+            
             # Populate the column selector with the dataframe's columns
             column_selector.options = df.columns.tolist()
             column_selector.disabled = False  # Enable the column selector
             run_button.disabled = True  # Disable the run button until a column is selected
-            print("CSV file loaded successfully. Columns are ready for selection.")
+            print("CSV file loaded successfully. Select a column from the dropdown.")
         except Exception as e:
             print(f"Error loading CSV file: {str(e)}")
 
@@ -72,7 +75,7 @@ def run_regex_tool(b):
         if df is not None and column_selector.value:
             selected_column = column_selector.value
             print(f"Running regex tool on column: {selected_column}")
-            # Call your regex_tool function here
+            # Example pattern: Call your regex_tool function here
             regex_tool(df, selected_column, r'\d{3}')
         else:
             if df is None:
