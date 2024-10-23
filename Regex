@@ -320,8 +320,6 @@ def regex_tool(data, column_name, initial_pattern, threshold=0.8):
     # Sandbox feature
     sandbox_environment(initial_pattern, unmatched)
 
-# Attach the function to the button
-run_button.on_click(run_regex_tool)
 
 # Display the widgets
 display(upload_widget, column_selector, run_button, output)
