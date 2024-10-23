@@ -6,6 +6,7 @@ import Levenshtein
 import time
 import ipywidgets as widgets
 import io
+import os
 from os import path
 from difflib import SequenceMatcher
 from ipyfilechooser import FileChooser
@@ -192,7 +193,7 @@ def explain_regex(pattern):
         explanation.append(r"`\w`: Matches any word character (letters, digits, underscore).")
     if r'\s' in pattern:
         explanation.append(r"`\s`: Matches any whitespace character.")
-    if '.' in pattern:
+    if '.' in pattern and not r'\.' in pattern:
         explanation.append("`. (dot)`: Matches any character except newline.")
     if '+' in pattern:
         explanation.append("`+`: Matches 1 or more of the preceding element.")
@@ -212,16 +213,14 @@ def levenshtein_approximate_match(unmatched_data, matched_data, threshold=0.8):
     matched, unmatched = [], []
     for value in unmatched_data:
         # Find the closest match in matched_data
-        closest_distance = None
-        closest_match = None
+        closest_similarity = 0
         for match_value in matched_data:
             distance = Levenshtein.distance(value, match_value)
             max_len = max(len(value), len(match_value))
             similarity = 1 - (distance / max_len) if max_len > 0 else 0
-            if closest_distance is None or similarity > closest_distance:
-                closest_distance = similarity
-                closest_match = match_value
-        if closest_distance >= threshold:
+            if similarity > closest_similarity:
+                closest_similarity = similarity
+        if closest_similarity >= threshold:
             matched.append(value)
         else:
             unmatched.append(value)
@@ -256,74 +255,59 @@ def interactive_buttons(optimized_pattern):
     # Provide alternative instructions if the button doesn't work
     display(Markdown("Copy the regex pattern manually if the button doesn't work."))
 
-# Enhanced regex generator function
-def generate_smart_regex(column_data):
+# Enhanced regex generator function for concise patterns
+def generate_concise_regex(column_data, max_pattern_length=100):
     unique_values = [s for s in set(column_data) if s]
     if not unique_values:
         return '.*'  # Return a generic pattern if data is empty
 
-    # Find minimum and maximum string lengths
-    min_len = min(len(s) for s in unique_values)
-    max_len = max(len(s) for s in unique_values)
+    # Find common prefix
+    prefix = os.path.commonprefix(unique_values)
+    # Find common suffix
+    reversed_strings = [s[::-1] for s in unique_values]
+    suffix = os.path.commonprefix(reversed_strings)[::-1]
 
-    # Initialize pattern components
-    pattern_parts = []
+    # Remove prefix and suffix from the strings
+    core_strings = [s[len(prefix):len(s)-len(suffix) if len(suffix) > 0 else len(s)] for s in unique_values]
 
-    for i in range(max_len):
-        chars_at_pos = set()
-        for s in unique_values:
-            if i < len(s):
-                chars_at_pos.add(s[i])
-            else:
-                chars_at_pos.add(None)
-
-        chars_at_pos.discard(None)
-        if not chars_at_pos:
-            # Position exceeds all string lengths
-            break
-
-        if len(chars_at_pos) == 1:
-            # Fixed character
-            char = chars_at_pos.pop()
-            pattern_parts.append(re.escape(char))
+    # Determine if the core strings are digits, letters, or alphanumeric
+    if all(s.isdigit() for s in core_strings):
+        min_len = min(len(s) for s in core_strings)
+        max_len = max(len(s) for s in core_strings)
+        if min_len == max_len:
+            core_pattern = r'\d{' + str(min_len) + '}'
         else:
-            # Variable character, determine character class
-            char_class = ''
-
-            if all(c.isdigit() for c in chars_at_pos):
-                char_class = r'\d'
-            elif all(c.isalpha() for c in chars_at_pos):
-                if all(c.islower() for c in chars_at_pos):
-                    char_class = r'[a-z]'
-                elif all(c.isupper() for c in chars_at_pos):
-                    char_class = r'[A-Z]'
-                else:
-                    char_class = r'[a-zA-Z]'
-            elif all(c in string.punctuation for c in chars_at_pos):
-                # Special characters
-                escaped_chars = ''.join(re.escape(c) for c in chars_at_pos)
-                char_class = f'[{escaped_chars}]'
-            else:
-                # Mixed character types
-                escaped_chars = ''.join(re.escape(c) for c in chars_at_pos)
-                char_class = f'[{escaped_chars}]'
-
-            pattern_parts.append(char_class)
-
-    # Handle variable string lengths
-    if min_len != max_len:
-        # Add optional pattern parts
-        pattern = ''
-        for idx, part in enumerate(pattern_parts):
-            if all(len(s) > idx for s in unique_values):
-                pattern += part
-            else:
-                pattern += f'(?:{part})?'
+            core_pattern = r'\d{' + str(min_len) + ',' + str(max_len) + '}'
+    elif all(s.isalpha() for s in core_strings):
+        min_len = min(len(s) for s in core_strings)
+        max_len = max(len(s) for s in core_strings)
+        if min_len == max_len:
+            core_pattern = r'[a-zA-Z]{' + str(min_len) + '}'
+        else:
+            core_pattern = r'[a-zA-Z]{' + str(min_len) + ',' + str(max_len) + '}'
+    elif all(s.isalnum() for s in core_strings):
+        min_len = min(len(s) for s in core_strings)
+        max_len = max(len(s) for s in core_strings)
+        if min_len == max_len:
+            core_pattern = r'\w{' + str(min_len) + '}'
+        else:
+            core_pattern = r'\w{' + str(min_len) + ',' + str(max_len) + '}'
     else:
-        pattern = ''.join(pattern_parts)
+        # High variability, use a generic pattern
+        min_len = min(len(s) for s in core_strings)
+        max_len = max(len(s) for s in core_strings)
+        if min_len == max_len:
+            core_pattern = r'.{' + str(min_len) + '}'
+        else:
+            core_pattern = r'.{' + str(min_len) + ',' + str(max_len) + '}'
 
-    # Add anchors
-    pattern = '^' + pattern + '$'
+    # Combine prefix, core pattern, and suffix
+    pattern = '^' + re.escape(prefix) + core_pattern + re.escape(suffix) + '$'
+
+    # Check pattern length
+    if len(pattern) > max_pattern_length:
+        # Pattern is too long, generalize further
+        pattern = '^' + re.escape(prefix) + '.*' + re.escape(suffix) + '$'
 
     return pattern
 
@@ -331,8 +315,8 @@ def generate_smart_regex(column_data):
 def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
     column_data = data[column_name].astype(str)
 
-    # Generate the regex pattern using the improved function
-    auto_generated_pattern = generate_smart_regex(column_data)
+    # Generate the regex pattern using the concise function
+    auto_generated_pattern = generate_concise_regex(column_data)
 
     # Determine which pattern to use
     if user_pattern:
