@@ -124,6 +124,38 @@ def sandbox_environment(pattern, test_data):
     print("Testing Regex in Sandbox Environment:")
     debug_regex(pattern, test_data)
 
+def provide_feedback(data, pattern):
+    matched = [row for row in data if re.search(pattern, row)]
+    unmatched = [row for row in data if not re.search(pattern, row)]
+    
+    match_percentage = len(matched) / len(data) * 100
+    feedback = f"Match Percentage: {match_percentage:.2f}%\n"
+    
+    if match_percentage < 80:
+        feedback += "Suggestions:\n"
+        feedback += "- Consider relaxing the pattern or using approximate matching (Levenshtein distance).\n"
+    
+    return feedback, matched, unmatched
+
+def explain_regex(pattern):
+    explanation = []
+    if re.search(r'\d', pattern):
+        explanation.append("Matches digit characters (0-9).")
+    if re.search(r'\w', pattern):
+        explanation.append("Matches word characters (a-z, A-Z, 0-9, _).")
+    if re.search(r'\s', pattern):
+        explanation.append("Matches whitespace characters.")
+    if re.search(r'\b', pattern):
+        explanation.append("Matches word boundaries.")
+    if re.search(r'[A-Z]', pattern):
+        explanation.append("Matches uppercase letters.")
+    if re.search(r'[a-z]', pattern):
+        explanation.append("Matches lowercase letters.")
+    if re.search(r'\.', pattern):
+        explanation.append("Matches any character.")
+    # Add more explanations as needed
+    return "\n".join(explanation)
+
 # Interactive buttons for pattern adjustment and copying to clipboard
 def interactive_buttons(optimized_pattern):
     display(HTML(f"""
