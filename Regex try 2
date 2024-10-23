@@ -1,10 +1,9 @@
 # Import necessary libraries
 import re
 import pandas as pd
-from IPython.display import display, HTML
+from IPython.display import display, Markdown, HTML
 import ipywidgets as widgets
 from ipyfilechooser import FileChooser
-from collections import defaultdict
 import itertools
 
 # Placeholder for the DataFrame
@@ -147,143 +146,74 @@ def handle_column_selection(change):
 # Attach the column selection observer
 column_selector.observe(handle_column_selection, names='value')
 
-# Function to infer regex pattern from examples using pairwise alignment
-def infer_regex_from_examples(examples):
-    # Use pairwise alignment to find common patterns
-    def longest_common_subsequence(s1, s2):
-        m = len(s1)
-        n = len(s2)
-        dp = [["" for x in range(n+1)] for x in range(m+1)]
-        for i in range(m):
-            for j in range(n):
-                if s1[i] == s2[j]:
-                    dp[i+1][j+1] = dp[i][j] + s1[i]
-                else:
-                    dp[i+1][j+1] = dp[i+1][j] if len(dp[i+1][j]) > len(dp[i][j+1]) else dp[i][j+1]
-        return dp[m][n]
+# Function to generate regex pattern from data
+def generate_regex_pattern(strings):
+    import re
+    if not strings:
+        return '.*'
 
-    # Start with the first example
-    common_subseq = examples[0]
-    for example in examples[1:]:
-        common_subseq = longest_common_subsequence(common_subseq, example)
-        if not common_subseq:
-            break
+    # Split each string into characters
+    split_strings = [list(s) for s in strings]
+    # Transpose the list to group characters by position
+    transposed = list(itertools.zip_longest(*split_strings, fillvalue=None))
 
-    if not common_subseq:
-        # If there's no common subsequence, fallback to generic pattern
-        min_len = min(len(s) for s in examples)
-        max_len = max(len(s) for s in examples)
-        return '^.{%d,%d}$' % (min_len, max_len)
-
-    # Build regex pattern by replacing variable parts with appropriate patterns
-    regex_parts = []
-    last_pos = 0
-    for match in re.finditer(re.escape(common_subseq), examples[0]):
-        start, end = match.span()
-        # Variable part before the match
-        if start > last_pos:
-            var_part = examples[0][last_pos:start]
-            regex_parts.append(pattern_for_variable_part(var_part, examples, last_pos, start))
-        # Fixed part (common subsequence)
-        regex_parts.append(re.escape(examples[0][start:end]))
-        last_pos = end
-    # Variable part after the last match
-    if last_pos < len(examples[0]):
-        var_part = examples[0][last_pos:]
-        regex_parts.append(pattern_for_variable_part(var_part, examples, last_pos, len(examples[0])))
-
-    pattern = '^' + ''.join(regex_parts) + '$'
+    pattern = ''
+    i = 0
+    while i < len(transposed):
+        chars = transposed[i]
+        chars_set = set(chars)
+        chars_set.discard(None)
+        if len(chars_set) == 1:
+            # All characters are the same at this position
+            char = chars_set.pop()
+            pattern += re.escape(char)
+            i += 1
+        else:
+            # Start of a variable segment
+            j = i
+            while j < len(transposed):
+                chars = transposed[j]
+                chars_set = set(chars)
+                chars_set.discard(None)
+                if len(chars_set) == 1:
+                    break
+                j += 1
+            # Variable segment from position i to j
+            variable_chars = transposed[i:j]
+            # Determine character class
+            var_char_sets = [set(filter(None, chars)) for chars in variable_chars]
+            if all(all(c.isdigit() for c in chars) for chars in var_char_sets):
+                pattern += r'\d{' + str(j - i) + '}'
+            elif all(all(c.isalpha() for c in chars) for chars in var_char_sets):
+                pattern += r'[a-zA-Z]{' + str(j - i) + '}'
+            elif all(all(c.isalnum() for c in chars) for chars in var_char_sets):
+                pattern += r'\w{' + str(j - i) + '}'
+            else:
+                pattern += r'.{' + str(j - i) + '}'
+            i = j
+    pattern = '^' + pattern + '$'
     return pattern
 
-def pattern_for_variable_part(fixed_part, examples, start_idx, end_idx):
-    # Analyze the variable part across all examples
-    var_parts = [s[start_idx:end_idx] for s in examples]
-    if all(part.isdigit() for part in var_parts):
-        # All digits
-        lengths = [len(part) for part in var_parts]
-        if min(lengths) == max(lengths):
-            return r'\d{' + str(lengths[0]) + '}'
-        else:
-            return r'\d{' + str(min(lengths)) + ',' + str(max(lengths)) + '}'
-    elif all(part.isalpha() for part in var_parts):
-        # All letters
-        lengths = [len(part) for part in var_parts]
-        if min(lengths) == max(lengths):
-            return r'[a-zA-Z]{' + str(lengths[0]) + '}'
-        else:
-            return r'[a-zA-Z]{' + str(min(lengths)) + ',' + str(max(lengths)) + '}'
-    elif all(part.isalnum() for part in var_parts):
-        # Alphanumeric
-        lengths = [len(part) for part in var_parts]
-        if min(lengths) == max(lengths):
-            return r'\w{' + str(lengths[0]) + '}'
-        else:
-            return r'\w{' + str(min(lengths)) + ',' + str(max(lengths)) + '}'
-    else:
-        # Mixed characters
-        lengths = [len(part) for part in var_parts]
-        return r'.{' + str(min(lengths)) + ',' + str(max(lengths)) + '}'
-
-# Define the main function to integrate all the functionality
-def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
-    column_data = data[column_name].astype(str).tolist()
-
-    # Generate the regex pattern using the advanced function
-    auto_generated_pattern = infer_regex_from_examples(column_data)
-
-    # Determine which pattern to use
-    if user_pattern:
-        initial_pattern = user_pattern
-        pattern_source = "User-provided pattern"
-    else:
-        initial_pattern = auto_generated_pattern
-        pattern_source = "Automatically generated pattern"
-
-    # Provide feedback based on initial pattern
-    feedback, matched, unmatched = provide_feedback(column_data, initial_pattern)
-
-    # Generate interactive output
-    display(f"**{pattern_source}:** `{initial_pattern}`")
-    display(f"**Regex Explanation:**\n{explain_regex(initial_pattern)}")
-    display(f"**Matched Rows:** {len(matched)}")
-    display(f"**Unmatched Rows:** {len(unmatched)}")
-    display(f"**Feedback:**\n{feedback}")
-
-    # If a user pattern was provided, offer the auto-generated pattern as a suggestion
-    if user_pattern:
-        display(f"**Auto-Generated Pattern Suggestion:** `{auto_generated_pattern}`")
-        display(f"**Auto-Generated Pattern Explanation:**\n{explain_regex(auto_generated_pattern)}")
-        interactive_buttons(auto_generated_pattern)
-    else:
-        interactive_buttons(initial_pattern)
-
-    # Sandbox feature
-    if len(unmatched) > 0:
-        sandbox_environment(initial_pattern, unmatched)
-
-# Function to measure regex performance
-def measure_performance(pattern, data):
-    start_time = time.time()
-    try:
-        compiled_pattern = re.compile(pattern)
-        matches = [compiled_pattern.fullmatch(value) for value in data]
-    except re.error as e:
-        end_time = time.time()
-        return {
-            "processing_time": end_time - start_time,
-            "match_count": 0,
-            "coverage_percentage": 0,
-            "error": str(e)
-        }
-    end_time = time.time()
-    processing_time = end_time - start_time
-    match_count = sum(1 for match in matches if match)
-    coverage_percentage = (match_count / len(data)) * 100 if len(data) > 0 else 0
-    return {
-        "processing_time": processing_time,
-        "match_count": match_count,
-        "coverage_percentage": coverage_percentage
-    }
+# Function to explain regex patterns
+def explain_regex(pattern):
+    explanation = []
+    components = [
+        (r'\^', "`^`: Matches the start of the string."),
+        (r'\$', "`$`: Matches the end of the string."),
+        (r'\\d\{\d+\}', r"`\d{n}`: Matches exactly n digits."),
+        (r'\\d\{\d+,\d+\}', r"`\d{n,m}`: Matches between n and m digits."),
+        (r'\\w\{\d+\}', r"`\w{n}`: Matches exactly n word characters."),
+        (r'\\w\{\d+,\d+\}', r"`\w{n,m}`: Matches between n and m word characters."),
+        (r'\[a-zA-Z\]\{\d+\}', r"`[a-zA-Z]{n}`: Matches exactly n letters."),
+        (r'\[a-zA-Z\]\{\d+,\d+\}', r"`[a-zA-Z]{n,m}`: Matches between n and m letters."),
+        (r'\.', "`.`: Matches any character except newline."),
+        (r'\.\{\d+\}', r"`.{n}`: Matches exactly n of any character."),
+        (r'\.\{\d+,\d+\}', r"`.{n,m}`: Matches between n and m of any character."),
+    ]
+    for regex, desc in components:
+        if re.search(regex, pattern):
+            explanation.append(desc)
+    return "\n".join(explanation)
 
 # Function to provide feedback
 def provide_feedback(data, pattern):
@@ -301,18 +231,55 @@ def provide_feedback(data, pattern):
 
 # Interactive buttons for pattern adjustment and copying to clipboard
 def interactive_buttons(optimized_pattern):
-    display(f"**Regex Pattern:** `{optimized_pattern}`")
+    display(Markdown(f"**Regex Pattern:** `{optimized_pattern}`"))
     display("Copy the regex pattern manually if needed.")
 
 # Sandbox Feature: Safe environment for testing regex patterns
 def sandbox_environment(pattern, test_data):
-    display("**Testing Regex in Sandbox Environment:**")
+    display(Markdown("**Testing Regex in Sandbox Environment:**"))
     for value in test_data[:5]:  # Limit output to first 5 entries
         match = re.fullmatch(pattern, value)
         if match:
             display(f"Value: {value} --> Matched: {match.group(0)}")
         else:
             display(f"Value: {value} --> No Match")
+
+# Define the main function to integrate all the functionality
+def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
+    column_data = data[column_name].astype(str).tolist()
+
+    # Generate the regex pattern using the improved function
+    auto_generated_pattern = generate_regex_pattern(column_data)
+
+    # Determine which pattern to use
+    if user_pattern:
+        initial_pattern = user_pattern
+        pattern_source = "User-provided pattern"
+    else:
+        initial_pattern = auto_generated_pattern
+        pattern_source = "Automatically generated pattern"
+
+    # Provide feedback based on initial pattern
+    feedback, matched, unmatched = provide_feedback(column_data, initial_pattern)
+
+    # Generate interactive output
+    display(Markdown(f"**{pattern_source}:** `{initial_pattern}`"))
+    display(Markdown(f"**Regex Explanation:**\n{explain_regex(initial_pattern)}"))
+    display(Markdown(f"**Matched Rows:** {len(matched)}"))
+    display(Markdown(f"**Unmatched Rows:** {len(unmatched)}"))
+    display(Markdown(f"**Feedback:**\n{feedback}"))
+
+    # If a user pattern was provided, offer the auto-generated pattern as a suggestion
+    if user_pattern:
+        display(Markdown(f"**Auto-Generated Pattern Suggestion:** `{auto_generated_pattern}`"))
+        display(Markdown(f"**Auto-Generated Pattern Explanation:**\n{explain_regex(auto_generated_pattern)}"))
+        interactive_buttons(auto_generated_pattern)
+    else:
+        interactive_buttons(initial_pattern)
+
+    # Sandbox feature
+    if len(unmatched) > 0:
+        sandbox_environment(initial_pattern, unmatched)
 
 # Function to trigger the regex tool when the button is clicked
 def run_regex_tool(b):
