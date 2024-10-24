@@ -1,0 +1,451 @@
+import re
+import pandas as pd
+from IPython.display import display, Markdown, HTML, clear_output
+import Levenshtein
+import time
+import ipywidgets as widgets
+import io
+import collections
+import matplotlib.pyplot as plt
+import seaborn as sns
+import random
+
+sns.set(style="whitegrid")
+
+class RegexIndividual:
+    """Represents an individual in the genetic algorithm population."""
+    def __init__(self, pattern):
+        self.pattern = pattern
+        self.fitness = 0
+
+    def __str__(self):
+        return f"Regex: {self.pattern}, Fitness: {self.fitness:.4f}"
+
+def calculate_fitness(individual, data, complexity_penalty=0.1, coverage_weight=0.5, simplicity_weight=0.3, speed_weight=0.2, complexity_weight=0.1):
+    """
+    Calculate the fitness of a regex individual based on coverage, simplicity, speed, and complexity.
+
+    Args:
+        individual (RegexIndividual): The regex individual to evaluate.
+        data (pd.Series): The data to evaluate against.
+        complexity_penalty (float): Penalty factor for regex complexity.
+        coverage_weight (float): Weight for coverage in fitness calculation.
+        simplicity_weight (float): Weight for simplicity in fitness calculation.
+        speed_weight (float): Weight for speed in fitness calculation.
+        complexity_weight (float): Weight for complexity in fitness calculation.
+
+    Returns:
+        float: The calculated fitness score.
+    """
+    try:
+        start_time = time.time()
+        matches = data.str.contains(individual.pattern, regex=True, case=False, na=False)
+        processing_time = time.time() - start_time
+        match_count = matches.sum()
+        coverage = match_count / len(data)
+        simplicity = 1 / (len(individual.pattern) + 1)
+        speed = 1 / (processing_time + 1e-6)
+        complexity = max(0, 1 - (complexity_penalty * len(re.findall(r"[\(\)\|\.\*\+\?\[\]\{\}\^\$]", individual.pattern))))
+        fitness = (coverage * coverage_weight) + (simplicity * simplicity_weight) + (speed * speed_weight) + (complexity * complexity_weight)
+    except re.error:
+        fitness = 0
+    return fitness
+
+class GeneticAlgorithm:
+    """Genetic Algorithm for evolving regex patterns."""
+    def __init__(self, data, population_size=30, generations=50, mutation_rate=0.2, crossover_rate=0.7, elitism_rate=0.2):
+        self.data = data
+        self.population_size = population_size
+        self.generations = generations
+        self.mutation_rate = mutation_rate
+        self.crossover_rate = crossover_rate
+        self.elitism_rate = elitism_rate
+        self.population = []
+        self.best_individual = None
+
+    def initialize_population(self, initial_patterns=None):
+        """Initialize the population with given patterns or random patterns."""
+        if initial_patterns:
+            for pattern in initial_patterns:
+                self.population.append(RegexIndividual(pattern))
+        while len(self.population) < self.population_size:
+            pattern = self.random_pattern()
+            self.population.append(RegexIndividual(pattern))
+
+    def random_pattern(self):
+        """Generate a random regex pattern."""
+        words = self.data.sample(n=5, replace=True).tolist()
+        escaped_words = [re.escape(word) for word in words]
+        pattern = "\\b(" + "|".join(escaped_words) + ")\\b"
+        return pattern
+
+    def evaluate_fitness(self):
+        """Evaluate fitness for all individuals in the population."""
+        for individual in self.population:
+            individual.fitness = calculate_fitness(individual, self.data)
+
+    def select_parents(self):
+        """Select two parents using tournament selection."""
+        tournament = random.sample(self.population, 5)
+        tournament = sorted(tournament, key=lambda x: x.fitness, reverse=True)
+        return tournament[0], tournament[1]
+
+    def crossover(self, parent1, parent2):
+        """Perform crossover between two parents to produce an offspring."""
+        if len(parent1.pattern) < 2 or len(parent2.pattern) < 2:
+            return RegexIndividual(parent1.pattern)
+        split1 = random.randint(1, len(parent1.pattern)-1)
+        split2 = random.randint(1, len(parent2.pattern)-1)
+        child_pattern = parent1.pattern[:split1] + parent2.pattern[split2:]
+        return RegexIndividual(child_pattern)
+
+    def mutate(self, individual):
+        """Mutate an individual's pattern."""
+        pattern = individual.pattern
+        if not pattern:
+            return
+        mutation_type = random.choice(['add', 'remove', 'change', 'swap'])
+        index = random.randint(0, len(pattern)-1)
+        if mutation_type == 'add':
+            char = random.choice(['\\', '(', ')', '|', '.', '*', '?', '+', '[', ']', '{', '}', '^', '$']) + random.choice('abcdefghijklmnopqrstuvwxyz')
+            pattern = pattern[:index] + char + pattern[index:]
+        elif mutation_type == 'remove':
+            pattern = pattern[:index] + pattern[index+1:]
+        elif mutation_type == 'change':
+            char = random.choice(['\\', '(', ')', '|', '.', '*', '?', '+', '[', ']', '{', '}', '^', '$'] + list('abcdefghijklmnopqrstuvwxyz'))
+            pattern = pattern[:index] + char + pattern[index+1:]
+        elif mutation_type == 'swap':
+            if index > 0:
+                pattern = pattern[:index-1] + pattern[index] + pattern[index-1] + pattern[index+1:]
+        individual.pattern = pattern
+
+    def run(self):
+        """Run the genetic algorithm to evolve the population."""
+        for gen in range(self.generations):
+            self.evaluate_fitness()
+            self.population.sort(key=lambda x: x.fitness, reverse=True)
+            if not self.best_individual or self.population[0].fitness > self.best_individual.fitness:
+                self.best_individual = self.population[0]
+                print(f"Generation {gen}: Best Fitness = {self.best_individual.fitness:.4f}, Pattern = {self.best_individual.pattern}")
+            elitism_count = int(self.population_size * self.elitism_rate)
+            new_population = self.population[:elitism_count]  # Elitism
+            while len(new_population) < self.population_size:
+                parent1, parent2 = self.select_parents()
+                if random.random() < self.crossover_rate:
+                    child = self.crossover(parent1, parent2)
+                else:
+                    child = RegexIndividual(parent1.pattern)
+                if random.random() < self.mutation_rate:
+                    self.mutate(child)
+                new_population.append(child)
+            self.population = new_population
+        return self.best_individual.pattern
+
+def ngram_analysis(column_data, n=3):
+    """Perform n-gram analysis to identify common substrings."""
+    ngrams = collections.Counter()
+    for text in column_data:
+        for i in range(len(text) - n + 1):
+            ngram = text[i:i+n]
+            ngrams[ngram] += 1
+    return ngrams.most_common(10)
+
+def validate_regex(pattern):
+    """Validate the regex pattern."""
+    try:
+        re.compile(pattern)
+        return True
+    except re.error:
+        return False
+
+def validate_data(df):
+    """Validate the uploaded DataFrame."""
+    if df.empty:
+        print("The uploaded CSV file is empty.")
+        return False
+    if not all(df.columns):
+        print("The uploaded CSV file has missing column headers.")
+        return False
+    return True
+
+def upload_csv_file():
+    """Create a file upload widget for CSV files."""
+    return widgets.FileUpload(accept=".csv", description="Upload CSV File")
+
+def select_column(data):
+    """Create a dropdown widget to select a column from the uploaded CSV data."""
+    if data is not None:
+        dropdown = widgets.Dropdown(options=list(data.columns), description="Select Column")
+        return dropdown
+    return None
+
+def run_regex_tool(data, column_name):
+    """Run the regex generation and evaluation process."""
+    if data is not None and column_name is not None:
+        selected_column = data[column_name].dropna().astype(str)
+        top_ngrams = ngram_analysis(selected_column, n=3)
+        initial_patterns = [ngram for ngram, _ in top_ngrams]
+        ga = GeneticAlgorithm(selected_column)
+        ga.initialize_population(initial_patterns)
+        best_regex = ga.run()
+        matches = selected_column.str.contains(best_regex, regex=True, case=False, na=False)
+        match_count = matches.sum()
+        coverage = match_count / len(selected_column)
+        display(Markdown(f"**Best Regex Pattern:** `{best_regex}`"))
+        display(Markdown(f"**Coverage:** {coverage:.4f}"))
+        display(Markdown("**Top 3-grams:**"))
+        for ngram, count in top_ngrams:
+            display(Markdown(f"- `{ngram}` ({count})"))
+        visualize_matches(best_regex, selected_column)
+        display_copy_button(best_regex)
+        display_test_interface(best_regex)
+        update_pattern_history(best_regex)
+    else:
+        display(Markdown("Please upload a CSV file and select a column."))
+
+def visualize_matches(pattern, data):
+    """Visualize regex match distribution using a bar chart."""
+    matches = data.str.contains(pattern, regex=True, case=False, na=False)
+    match_counts = matches.value_counts()
+    plt.figure(figsize=(6,4))
+    sns.barplot(x=match_counts.index.map({True: 'Match', False: 'No Match'}), y=match_counts.values, palette="viridis")
+    plt.title('Regex Match Distribution')
+    plt.xlabel('Match Result')
+    plt.ylabel('Number of Entries')
+    plt.show()
+
+def display_copy_button(regex):
+    """Display a textarea with the regex and a button to copy it to clipboard."""
+    regex_textarea = widgets.Textarea(
+        value=regex,
+        description='Regex:',
+        disabled=True,
+        layout=widgets.Layout(width='100%', height='100px')
+    )
+    copy_button = widgets.Button(
+        description="Copy Regex",
+        button_style='success',
+        tooltip='Copy the generated regex to clipboard',
+        icon='clipboard'
+    )
+    display(regex_textarea, copy_button)
+
+    def on_copy_clicked(b):
+        """Handle the copy button click event."""
+        # Escape backslashes and quotes in regex to prevent JS errors
+        safe_regex = regex.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
+        js_code = f"""
+        <script>
+        navigator.clipboard.writeText("{safe_regex}").then(function() {{
+            alert('Regex copied to clipboard!');
+        }}, function(err) {{
+            alert('Could not copy text: ', err);
+        }});
+        </script>
+        """
+        display(HTML(js_code))
+
+    copy_button.on_click(on_copy_clicked)
+
+def display_test_interface(pattern):
+    """Display a testing interface for the generated regex."""
+    test_input = widgets.Textarea(
+        value='',
+        placeholder='Enter test strings separated by commas',
+        description='Test Inputs:',
+        disabled=False,
+        layout=widgets.Layout(width='100%', height='100px')
+    )
+    
+    test_button = widgets.Button(
+        description="Run Tests",
+        button_style='info',
+        tooltip='Test the regex against the inputs',
+        icon='check'
+    )
+    
+    test_output = widgets.Output()
+    
+    def on_test_clicked(b):
+        """Handle the test button click event."""
+        with test_output:
+            clear_output()
+            test_strings = [s.strip() for s in test_input.value.split(',') if s.strip()]
+            if not test_strings:
+                print("No test strings provided.")
+                return
+            try:
+                compiled_regex = re.compile(pattern, re.IGNORECASE)
+                for s in test_strings:
+                    match = compiled_regex.search(s)
+                    print(f"Input: '{s}' --> Match: {'Yes' if match else 'No'}")
+            except re.error as e:
+                print(f"Error compiling regex: {e}")
+    
+    test_button.on_click(on_test_clicked)
+    display(test_input, test_button, test_output)
+
+def update_pattern_history(pattern):
+    """Update and display the history of generated regex patterns."""
+    if 'pattern_history' not in globals():
+        global pattern_history
+        pattern_history = []
+    pattern_history.append(pattern)
+    
+    if pattern_history:
+        display(Markdown("**Pattern History:**"))
+        for idx, pattern in enumerate(pattern_history, 1):
+            display(Markdown(f"{idx}. `{pattern}`"))
+
+def display_help_section():
+    """Display help sections explaining key concepts."""
+    help_button = widgets.ToggleButton(
+        value=False,
+        description='Show Help',
+        disabled=False,
+        button_style='info',
+        tooltip='Click to show/hide help information',
+        icon='question'
+    )
+    
+    help_output = widgets.Output()
+    
+    def on_help_toggled(change):
+        """Handle the help toggle button."""
+        with help_output:
+            clear_output()
+            if change['new']:
+                display(Markdown("""
+                ### **Help Information**
+                
+                **What are 3-grams?**
+                
+                - **Definition:** A 3-gram is a contiguous sequence of three items from a given sample of text. In this context, it refers to substrings of length three characters extracted from the data.
+                - **Purpose:** Analyzing 3-grams helps identify common patterns or sequences within the data, which can inform the initial population of regex patterns for the Genetic Algorithm.
+                
+                **Genetic Algorithm Parameters:**
+                
+                - **Population Size:** Number of regex patterns evaluated in each generation.
+                - **Generations:** Number of iterations the algorithm will perform to evolve the regex patterns.
+                - **Mutation Rate:** Probability of making random changes to a regex pattern during evolution.
+                - **Crossover Rate:** Probability of combining parts of two parent regex patterns to create a new offspring pattern.
+                - **Elitism Rate:** Proportion of top-performing regex patterns that are carried over unchanged to the next generation.
+                
+                **How to Use the Sliders:**
+                
+                - **Population Size:** A larger population increases diversity but may require more computation time.
+                - **Generations:** More generations allow for finer optimization but increase runtime.
+                - **Mutation Rate:** Higher rates introduce more diversity but may disrupt good patterns.
+                - **Crossover Rate:** Determines how often new patterns are created by combining existing ones.
+                - **Elitism Rate:** Ensures that the best patterns are preserved across generations.
+                
+                **Testing Your Regex:**
+                
+                - After generating the regex, use the testing interface to validate its effectiveness against sample inputs.
+                """))
+            else:
+                clear_output()
+    
+    help_button.observe(on_help_toggled, names='value')
+    display(help_button, help_output)
+
+def main():
+    """Main function to display interactive widgets and run the regex tool."""
+    upload_widget = upload_csv_file()
+    column_dropdown = None
+    data = None
+
+    display_help_section()
+    
+    def on_upload(change):
+        """Handle the CSV file upload event."""
+        nonlocal data, column_dropdown
+        try:
+            if not upload_widget.value:
+                return
+            uploaded_file = next(iter(upload_widget.value.values()))
+            content = uploaded_file['content']
+            data = pd.read_csv(io.BytesIO(content))
+            if not validate_data(data):
+                return
+            display(Markdown("**CSV File Loaded Successfully!**"))
+            display(data.head())
+            column_dropdown = select_column(data)
+            display(column_dropdown)
+        except Exception as e:
+            print(f"Error uploading file: {e}")
+
+    upload_widget.observe(on_upload, names='value')
+    
+    # Parameter Adjustment Widgets with Enhanced Descriptions and Tooltips
+    population_size_slider = widgets.IntSlider(
+        value=30,
+        min=10,
+        max=100,
+        step=10,
+        description='Population Size:',
+        continuous_update=False,
+        tooltip='Number of regex patterns evaluated in each generation.'
+    )
+    
+    generations_slider = widgets.IntSlider(
+        value=50,
+        min=10,
+        max=200,
+        step=10,
+        description='Generations:',
+        continuous_update=False,
+        tooltip='Number of iterations the algorithm will perform to evolve regex patterns.'
+    )
+    
+    mutation_rate_slider = widgets.FloatSlider(
+        value=0.2,
+        min=0.0,
+        max=1.0,
+        step=0.05,
+        description='Mutation Rate:',
+        continuous_update=False,
+        tooltip='Probability of making random changes to a regex pattern during evolution.'
+    )
+    
+    crossover_rate_slider = widgets.FloatSlider(
+        value=0.7,
+        min=0.0,
+        max=1.0,
+        step=0.05,
+        description='Crossover Rate:',
+        continuous_update=False,
+        tooltip='Probability of combining parts of two parent regex patterns to create a new offspring pattern.'
+    )
+    
+    elitism_rate_slider = widgets.FloatSlider(
+        value=0.2,
+        min=0.0,
+        max=0.5,
+        step=0.05,
+        description='Elitism Rate:',
+        continuous_update=False,
+        tooltip='Proportion of top-performing regex patterns that are carried over unchanged to the next generation.'
+    )
+    
+    # Display Parameter Sliders
+    display(population_size_slider, generations_slider, mutation_rate_slider, crossover_rate_slider, elitism_rate_slider)
+    
+    run_button = widgets.Button(
+        description="Run Regex Tool",
+        button_style='primary',
+        tooltip='Click to generate the best regex pattern based on the selected column.',
+        icon='play'
+    )
+    
+    def on_run_button_click(b):
+        """Handle the run button click event."""
+        run_regex_tool(
+            data=data[column_dropdown.value].dropna().astype(str),
+            column_name=column_dropdown.value
+        )
+    
+    run_button.on_click(on_run_button_click)
+    display(run_button)
+
+main()
