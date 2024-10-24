@@ -1,0 +1,210 @@
+# Import necessary libraries
+import re
+import pandas as pd
+from IPython.display import display, HTML, Markdown
+import Levenshtein
+import time
+import ipywidgets as widgets
+import io
+import collections
+import base64
+import matplotlib.pyplot as plt
+import seaborn as sns
+import random
+import numpy as np
+
+# Set Seaborn style for better aesthetics
+sns.set(style="whitegrid")
+
+# Genetic Algorithm Classes and Functions
+
+class RegexIndividual:
+    """
+    Represents an individual in the genetic algorithm population.
+    Each individual has a regex pattern and a fitness score.
+    """
+    def __init__(self, pattern):
+        self.pattern = pattern
+        self.fitness = 0
+
+    def __str__(self):
+        return f"Regex: {self.pattern}, Fitness: {self.fitness:.4f}"
+
+def calculate_fitness(individual, data, complexity_penalty=0.1):
+    """
+    Calculate the fitness of a regex individual based on coverage, simplicity, and processing speed.
+
+    Args:
+        individual (RegexIndividual): The regex individual.
+        data (pd.Series): The data to evaluate against.
+        complexity_penalty (float): Penalty for overly complex regex patterns.
+
+    Returns:
+        float: The fitness score.
+    """
+    try:
+        start_time = time.time()
+        matches = data.str.contains(individual.pattern, regex=True, case=False, na=False)
+        end_time = time.time()
+        processing_time = end_time - start_time
+        match_count = matches.sum()
+        coverage = match_count / len(data)  # Between 0 and 1
+
+        # Simplicity: fewer characters = simpler
+        simplicity = 1 / (len(individual.pattern) + 1)  # Avoid division by zero
+
+        # Processing speed: faster is better (inverse of processing time)
+        speed = 1 / (processing_time + 1e-6)  # Avoid division by zero
+
+        # Complexity penalty: penalize overly complex patterns
+        complexity = 1 - (complexity_penalty * len(re.findall(r"[\(\)\|\.\*\+\?\[\]\{\}\^\$]", individual.pattern)))
+
+        # Multi-objective fitness with weights
+        fitness = (coverage * 0.5) + (simplicity * 0.3) + (speed * 0.2) + (complexity * 0.1)
+    except re.error:
+        fitness = 0  # Penalize invalid regex
+    return fitness
+
+class GeneticAlgorithm:
+    def __init__(self, data, population_size=30, generations=50, mutation_rate=0.2, crossover_rate=0.7):
+        self.data = data
+        self.population_size = population_size
+        self.generations = generations
+        self.mutation_rate = mutation_rate
+        self.crossover_rate = crossover_rate
+        self.population = []
+        self.best_individual = None
+
+    def initialize_population(self, initial_patterns=None):
+        """
+        Initialize the population with given patterns or random patterns.
+
+        Args:
+            initial_patterns (list, optional): List of initial regex patterns.
+        """
+        if initial_patterns:
+            for pattern in initial_patterns:
+                self.population.append(RegexIndividual(pattern))
+        # If not enough initial patterns, generate random patterns
+        while len(self.population) < self.population_size:
+            pattern = self.random_pattern()
+            self.population.append(RegexIndividual(pattern))
+
+    def random_pattern(self):
+        """
+        Generate a random regex pattern.
+
+        Returns:
+            str: A random regex pattern.
+        """
+        # Simple random patterns: word boundaries and random words
+        words = self.data.sample(n=5, replace=True).tolist()
+        escaped_words = [re.escape(word) for word in words]
+        pattern = "\\b(" + "|".join(escaped_words) + ")\\b"
+        return pattern
+
+    def evaluate_fitness(self):
+        """
+        Evaluate fitness for all individuals in the population.
+        """
+        for individual in self.population:
+            individual.fitness = calculate_fitness(individual, self.data)
+
+    def select_parents(self):
+        """
+        Select two parents using tournament selection.
+
+        Returns:
+            tuple: Two selected RegexIndividual instances.
+        """
+        tournament_size = 5
+        tournament = random.sample(self.population, tournament_size)
+        tournament = sorted(tournament, key=lambda x: x.fitness, reverse=True)
+        return tournament[0], tournament[1]
+
+    def crossover(self, parent1, parent2):
+        """
+        Perform crossover between two parents to produce an offspring.
+
+        Args:
+            parent1 (RegexIndividual): First parent.
+            parent2 (RegexIndividual): Second parent.
+
+        Returns:
+            RegexIndividual: The offspring.
+        """
+        # Two-point crossover
+        if len(parent1.pattern) < 2 or len(parent2.pattern) < 2:
+            return RegexIndividual(parent1.pattern)
+
+        split1 = random.randint(1, len(parent1.pattern)-1)
+        split2 = random.randint(1, len(parent2.pattern)-1)
+        child_pattern = parent1.pattern[:split1] + parent2.pattern[split2:]
+        return RegexIndividual(child_pattern)
+
+    def mutate(self, individual):
+        """
+        Mutate an individual's pattern.
+
+        Args:
+            individual (RegexIndividual): The individual to mutate.
+        """
+        pattern = individual.pattern
+        if len(pattern) == 0:
+            return
+        # Randomly choose to add, remove, or change a character
+        mutation_type = random.choice(['add', 'remove', 'change'])
+        index = random.randint(0, len(pattern)-1)
+        if mutation_type == 'add':
+            # Add a random regex character or a random letter
+            char = random.choice(['\\', '(', ')', '|', '.', '*', '?', '+', '[', ']', '{', '}', '^', '$']) + random.choice('abcdefghijklmnopqrstuvwxyz')
+            pattern = pattern[:index] + char + pattern[index:]
+        elif mutation_type == 'remove':
+            pattern = pattern[:index] + pattern[index+1:]
+        elif mutation_type == 'change':
+            char = random.choice(['\\', '(', ')', '|', '.', '*', '?', '+', '[', ']', '{', '}', '^', '$', 'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'])
+            pattern = pattern[:index] + char + pattern[index+1:]
+        individual.pattern = pattern
+
+    def run(self):
+        """
+        Run the genetic algorithm to evolve the population.
+        """
+        for gen in range(self.generations):
+            self.evaluate_fitness()
+            # Sort population by fitness
+            self.population = sorted(self.population, key=lambda x: x.fitness, reverse=True)
+            if self.best_individual is None or self.population[0].fitness > self.best_individual.fitness:
+                self.best_individual = self.population[0]
+                print(f"Generation {gen}: Best Fitness = {self.best_individual.fitness:.4f}, Pattern = {self.best_individual.pattern}")
+            # Create new population
+            new_population = self.population[:2]  # Elitism: carry forward top 2
+            while len(new_population) < self.population_size:
+                parent1, parent2 = self.select_parents()
+                if random.random() < self.crossover_rate:
+                    child = self.crossover(parent1, parent2)
+                else:
+                    child = RegexIndividual(parent1.pattern)
+                if random.random() < self.mutation_rate:
+                    self.mutate(child)
+                new_population.append(child)
+            self.population = new_population
+        # After all generations, return the best individual
+        return self.best_individual.pattern
+
+# -------------------
+# Enhanced Feature Extraction and Analysis Functions
+# -------------------
+
+def ngram_analysis(column_data, n=3):
+    """
+    Perform n-gram analysis to identify common substrings.
+
+    Args:
+        column_data (pd.Series): Data from the selected column.
+        n (int): Length of the n-grams.
+
+    Returns:
+        list: List of common n-grams sorted by frequency.
+    """
+    ng
