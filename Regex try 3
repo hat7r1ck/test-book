@@ -1,0 +1,452 @@
+# Import necessary libraries
+import re
+import pandas as pd
+from IPython.display import display, HTML, Markdown
+import Levenshtein
+import time
+import ipywidgets as widgets
+import io
+import collections
+import base64
+import matplotlib.pyplot as plt
+import seaborn as sns
+import random
+
+# Set Seaborn style for better aesthetics
+sns.set(style="whitegrid")
+
+# -------------------
+# Genetic Algorithm Classes and Functions
+# -------------------
+
+class RegexIndividual:
+    """
+    Represents an individual in the genetic algorithm population.
+    Each individual has a regex pattern and a fitness score.
+    """
+    def __init__(self, pattern):
+        self.pattern = pattern
+        self.fitness = 0
+
+    def __str__(self):
+        return f"Regex: {self.pattern}, Fitness: {self.fitness}"
+
+def calculate_fitness(individual, data):
+    """
+    Calculate the fitness of a regex individual based on coverage and simplicity.
+    
+    Args:
+        individual (RegexIndividual): The regex individual.
+        data (pd.Series): The data to evaluate against.
+    
+    Returns:
+        float: The fitness score.
+    """
+    try:
+        start_time = time.time()
+        matches = data.str.contains(individual.pattern, regex=True, case=False, na=False)
+        end_time = time.time()
+        processing_time = end_time - start_time
+        match_count = matches.sum()
+        coverage = match_count / len(data)  # Between 0 and 1
+        simplicity = 1 / len(individual.pattern)  # Shorter patterns are better
+        # Fitness could be a weighted sum; adjust weights as needed
+        fitness = coverage * 0.7 + simplicity * 0.3
+    except re.error:
+        fitness = 0  # Penalize invalid regex
+    return fitness
+
+class GeneticAlgorithm:
+    def __init__(self, data, population_size=50, generations=100, mutation_rate=0.1, crossover_rate=0.7):
+        self.data = data
+        self.population_size = population_size
+        self.generations = generations
+        self.mutation_rate = mutation_rate
+        self.crossover_rate = crossover_rate
+        self.population = []
+        self.best_individual = None
+
+    def initialize_population(self, initial_patterns=None):
+        """
+        Initialize the population with given patterns or random patterns.
+        
+        Args:
+            initial_patterns (list, optional): List of initial regex patterns.
+        """
+        if initial_patterns:
+            for pattern in initial_patterns:
+                self.population.append(RegexIndividual(pattern))
+        # If not enough initial patterns, generate random patterns
+        while len(self.population) < self.population_size:
+            pattern = self.random_pattern()
+            self.population.append(RegexIndividual(pattern))
+
+    def random_pattern(self):
+        """
+        Generate a random regex pattern.
+        
+        Returns:
+            str: A random regex pattern.
+        """
+        # Simple random patterns: word boundaries and random words
+        words = self.data.sample(n=5, replace=True).tolist()
+        escaped_words = [re.escape(word) for word in words]
+        pattern = "\\b(" + "|".join(escaped_words) + ")\\b"
+        return pattern
+
+    def evaluate_fitness(self):
+        """
+        Evaluate fitness for all individuals in the population.
+        """
+        for individual in self.population:
+            individual.fitness = calculate_fitness(individual, self.data)
+
+    def select_parents(self):
+        """
+        Select two parents using tournament selection.
+        
+        Returns:
+            tuple: Two selected RegexIndividual instances.
+        """
+        tournament_size = 5
+        tournament = random.sample(self.population, tournament_size)
+        tournament = sorted(tournament, key=lambda x: x.fitness, reverse=True)
+        return tournament[0], tournament[1]
+
+    def crossover(self, parent1, parent2):
+        """
+        Perform crossover between two parents to produce an offspring.
+        
+        Args:
+            parent1 (RegexIndividual): First parent.
+            parent2 (RegexIndividual): Second parent.
+        
+        Returns:
+            RegexIndividual: The offspring.
+        """
+        # Simple crossover: take half of parent1's pattern and half of parent2's
+        split1 = len(parent1.pattern) // 2
+        split2 = len(parent2.pattern) // 2
+        child_pattern = parent1.pattern[:split1] + parent2.pattern[split2:]
+        return RegexIndividual(child_pattern)
+
+    def mutate(self, individual):
+        """
+        Mutate an individual's pattern.
+        
+        Args:
+            individual (RegexIndividual): The individual to mutate.
+        """
+        pattern = individual.pattern
+        if len(pattern) == 0:
+            return
+        # Randomly choose to add, remove, or change a character
+        mutation_type = random.choice(['add', 'remove', 'change'])
+        index = random.randint(0, len(pattern)-1)
+        if mutation_type == 'add':
+            # Add a random regex character or a random letter
+            char = random.choice(['\\', '(', ')', '|', '.', '*', '?', '+', '[', ']', '{', '}', '^', '$']) + random.choice('abcdefghijklmnopqrstuvwxyz')
+            pattern = pattern[:index] + char + pattern[index:]
+        elif mutation_type == 'remove':
+            pattern = pattern[:index] + pattern[index+1:]
+        elif mutation_type == 'change':
+            char = random.choice(['\\', '(', ')', '|', '.', '*', '?', '+', '[', ']', '{', '}', '^', '$', 'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'])
+            pattern = pattern[:index] + char + pattern[index+1:]
+        individual.pattern = pattern
+
+    def run(self):
+        """
+        Run the genetic algorithm to evolve the population.
+        """
+        for gen in range(self.generations):
+            self.evaluate_fitness()
+            # Sort population by fitness
+            self.population = sorted(self.population, key=lambda x: x.fitness, reverse=True)
+            if self.best_individual is None or self.population[0].fitness > self.best_individual.fitness:
+                self.best_individual = self.population[0]
+                print(f"Generation {gen}: Best Fitness = {self.best_individual.fitness:.4f}, Pattern = {self.best_individual.pattern}")
+            # Create new population
+            new_population = self.population[:2]  # Elitism: carry forward top 2
+            while len(new_population) < self.population_size:
+                parent1, parent2 = self.select_parents()
+                if random.random() < self.crossover_rate:
+                    child = self.crossover(parent1, parent2)
+                else:
+                    child = RegexIndividual(parent1.pattern)
+                if random.random() < self.mutation_rate:
+                    self.mutate(child)
+                new_population.append(child)
+            self.population = new_population
+        # After all generations, return the best individual
+        return self.best_individual.pattern
+
+# -------------------
+# Helper Functions
+# -------------------
+
+def generate_regex_pattern(column_data):
+    """
+    Generate an optimized, case-insensitive regex pattern with word boundaries.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+    
+    Returns:
+        str: Optimized regex pattern.
+    """
+    # Extract unique entries and sort by length descending
+    unique_entries = sorted(column_data.dropna().astype(str).unique(), key=lambda x: len(x), reverse=True)
+    
+    # Escape special regex characters
+    escaped_entries = [re.escape(entry) for entry in unique_entries]
+    
+    # Add word boundaries
+    word_bound_entries = [f"\\b{entry}\\b" for entry in escaped_entries]
+    
+    # Combine using alternation
+    pattern = "|".join(word_bound_entries)
+    
+    # Return pattern
+    return pattern
+
+def measure_regex_performance(pattern, data):
+    """
+    Measure the performance of a regex pattern against data.
+    
+    Args:
+        pattern (str): The regex pattern.
+        data (pd.Series): The data to test against.
+    
+    Returns:
+        dict: Performance metrics.
+    """
+    start_time = time.time()
+    matches = data.str.contains(pattern, regex=True, case=False, na=False)
+    end_time = time.time()
+    processing_time = end_time - start_time
+    match_count = matches.sum()
+    coverage_percentage = (match_count / len(data)) * 100
+    return {
+        "processing_time": processing_time,
+        "match_count": match_count,
+        "coverage_percentage": coverage_percentage
+    }
+
+def provide_feedback(performance_metrics):
+    """
+    Provide feedback based on regex performance.
+    
+    Args:
+        performance_metrics (dict): Metrics containing processing time, match count, and coverage percentage.
+    
+    Returns:
+        str: Feedback message.
+    """
+    feedback = f"**Processing Time:** {performance_metrics['processing_time']:.4f} seconds\n"
+    feedback += f"**Matches:** {performance_metrics['match_count']} out of {len(data)} entries\n"
+    feedback += f"**Coverage:** {performance_metrics['coverage_percentage']:.2f}%\n\n"
+    
+    if performance_metrics['coverage_percentage'] < 80:
+        feedback += "**Suggestions:**\n"
+        feedback += "- Consider identifying common prefixes, suffixes, or substrings to optimize the regex.\n"
+        feedback += "- Utilize quantifiers to handle variations in the data.\n"
+    
+    return feedback
+
+def explain_regex(pattern):
+    """
+    Provide a basic explanation of the regex pattern.
+    
+    Args:
+        pattern (str): The regex pattern.
+    
+    Returns:
+        str: Explanation of the pattern.
+    """
+    explanation = []
+    if pattern.startswith("^"):
+        explanation.append("Matches the start of the string.")
+    if pattern.endswith("$"):
+        explanation.append("Matches the end of the string.")
+    if "|" in pattern:
+        explanation.append("Uses alternation to match one of the specified patterns.")
+    if "\\b" in pattern:
+        explanation.append("Uses word boundaries for precise matching.")
+    return "\n".join(explanation) if explanation else "No specific patterns detected."
+
+def visualize_matches(pattern, data):
+    """
+    Visualize regex match distribution using a bar chart.
+    
+    Args:
+        pattern (str): The regex pattern.
+        data (pd.Series): The data to test against.
+    """
+    matches = data.str.contains(pattern, regex=True, case=False, na=False)
+    match_counts = matches.value_counts()
+    plt.figure(figsize=(6,4))
+    sns.barplot(x=match_counts.index.map({True: 'Match', False: 'No Match'}), y=match_counts.values, palette="viridis")
+    plt.title('Regex Match Distribution')
+    plt.xlabel('Match Result')
+    plt.ylabel('Number of Entries')
+    plt.show()
+
+def levenshtein_approximate_match(unmatched_data, pattern, threshold=0.8):
+    """
+    Perform approximate matching using Levenshtein distance.
+    
+    Args:
+        unmatched_data (pd.Series): Data that didn't match the regex.
+        pattern (str): The regex pattern used.
+        threshold (float): Similarity threshold (0 to 1).
+    
+    Returns:
+        tuple: Matched and unmatched data based on threshold.
+    """
+    matched = []
+    unmatched = []
+    # Extract the words from the pattern for similarity comparison
+    pattern_words = re.findall(r'\\b(\w+)\\b', pattern)
+    for value in unmatched_data:
+        similarity = max([Levenshtein.ratio(value.lower(), pw.lower()) for pw in pattern_words] + [0])
+        if similarity >= threshold:
+            matched.append(value)
+        else:
+            unmatched.append(value)
+    return matched, unmatched
+
+# -------------------
+# Main Regex Tool Function
+# -------------------
+
+def regex_tool(data, column_name, initial_pattern, threshold=0.8):
+    """
+    Main function to generate and evaluate regex patterns based on a selected column.
+    
+    Args:
+        data (pd.DataFrame): The dataframe containing the data.
+        column_name (str): The column to generate regex from.
+        initial_pattern (str): An initial regex pattern to start with.
+        threshold (float): Threshold for approximate matching using Levenshtein distance.
+    """
+    column_data = data[column_name].dropna().astype(str)
+    
+    print(f"### Generating optimized regex for column: **{column_name}**")
+    
+    # Generate optimized regex based on common patterns
+    optimized_pattern = generate_regex_pattern(column_data)
+    print(f"**Optimized Pattern Suggestion:** `{optimized_pattern}`")
+    
+    # Initialize the Genetic Algorithm
+    ga = GeneticAlgorithm(column_data)
+    # Initialize population with the optimized pattern
+    ga.initialize_population(initial_patterns=[optimized_pattern])
+    # Run the genetic algorithm
+    best_pattern = ga.run()
+    print(f"**Best Regex Pattern from Genetic Algorithm:** `{best_pattern}`")
+    
+    # Measure performance of the best pattern
+    performance_metrics = measure_regex_performance(best_pattern, column_data)
+    print("\n**Performance Metrics for Best Pattern:**")
+    print(f"- Processing Time: {performance_metrics['processing_time']:.4f} seconds")
+    print(f"- Matches: {performance_metrics['match_count']} out of {len(data)} entries")
+    print(f"- Coverage: {performance_metrics['coverage_percentage']:.2f}%")
+    
+    # Provide feedback based on best pattern
+    feedback = provide_feedback(performance_metrics)
+    display(Markdown(feedback))
+    
+    # Display explanations
+    explanation = explain_regex(best_pattern)
+    display(Markdown(f"**Regex Explanation:**\n{explanation}"))
+    
+    # Display and visualize the regex match distribution
+    print("\n**Visualizing Regex Match Distribution:**")
+    visualize_matches(best_pattern, column_data)
+    
+    # Provide a download button for the regex
+    print("\n**Download the Generated Regex:**")
+    regex_textarea = widgets.Textarea(
+        value=best_pattern,
+        placeholder='Generated regex',
+        description='Regex:',
+        disabled=True,
+        layout=widgets.Layout(width='100%', height='100px')
+    )
+    display(regex_textarea)
+    
+    download_button = widgets.Button(
+        description="Download Regex",
+        button_style='success',
+        tooltip='Download the generated regex',
+        icon='download'
+    )
+    
+    def on_download_clicked(b):
+        # Encode the regex to bytes
+        regex_bytes = best_pattern.encode('utf-8')
+        b64 = base64.b64encode(regex_bytes).decode()
+        href = f'<a href="data:text/plain;base64,{b64}" download="generated_regex.txt">Click here to download the regex</a>'
+        display(HTML(href))
+    
+    download_button.on_click(on_download_clicked)
+    display(download_button)
+    
+    # Provide a testing interface
+    print("\n**Test the Generated Regex:**")
+    test_input = widgets.Textarea(
+        value='',
+        placeholder='Enter test strings separated by commas',
+        description='Test Inputs:',
+        disabled=False,
+        layout=widgets.Layout(width='100%', height='100px')
+    )
+    
+    test_button = widgets.Button(
+        description="Run Tests",
+        button_style='info',
+        tooltip='Test the regex against the inputs',
+        icon='check'
+    )
+    
+    test_output = widgets.Output()
+    
+    def on_test_clicked(b):
+        with test_output:
+            clear_output()
+            test_strings = [s.strip() for s in test_input.value.split(',') if s.strip()]
+            if not test_strings:
+                print("No test strings provided.")
+                return
+            try:
+                compiled_regex = re.compile(best_pattern, re.IGNORECASE)
+                for s in test_strings:
+                    match = compiled_regex.search(s)
+                    print(f"Input: '{s}' --> Match: {'Yes' if match else 'No'}")
+            except re.error as e:
+                print(f"Error compiling regex: {e}")
+    
+    test_button.on_click(on_test_clicked)
+    display(test_input, test_button, test_output)
+    
+    # Regex Debugger: Step-by-step matching
+    print("\n**Regex Debugger:**")
+    matches = data[column_name].str.contains(best_pattern, regex=True, case=False, na=False)
+    matched_data = data[column_name][matches]
+    for value in matched_data.head(5):  # Display first 5 matches for brevity
+        match = re.search(best_pattern, value, re.IGNORECASE)
+        if match:
+            print(f"Value: '{value}' --> Matched: '{match.group(0)}'")
+        else:
+            print(f"Value: '{value}' --> No Match'")
+    
+    # Feature: Pattern History
+    if 'pattern_history' not in globals():
+        global pattern_history
+        pattern_history = []
+    pattern_history.append(best_pattern)
+    
+    if pattern_history:
+        print("\n**Pattern History:**")
+        for idx, pattern in enumerate(pattern_history, 1):
+            print(f"{idx}. `{pattern}`")
