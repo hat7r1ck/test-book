@@ -1,151 +1,18 @@
-# Import necessary libraries
 import re
 import random
 import numpy as np
 import pandas as pd
-from IPython.display import display, Markdown
-import ipywidgets as widgets
+import matplotlib.pyplot as plt
 
-# Placeholder for the DataFrame
-df = None
+class EvolutionRegex:
+    """
+    Genetic Algorithm for Regex Pattern Generation.
 
-# UI Components
-style = {'description_width': 'initial'}
-layout = widgets.Layout(width='50%')
-button_layout = widgets.Layout(width='20%')
-
-# File upload widget
-file_upload = widgets.FileUpload(
-    accept='.csv',  # Accepts CSV files
-    multiple=False,
-    description='Upload CSV File',
-    style=style,
-    layout=layout
-)
-
-# Button to load CSV
-load_button = widgets.Button(
-    description="Load CSV",
-    layout=button_layout,
-    button_style='primary',
-    disabled=True  # Initially disabled until a file is uploaded
-)
-
-# Column selector widget
-column_selector = widgets.Dropdown(
-    options=[],  # To be populated with column names after loading CSV
-    description="Select Data Column:",
-    style=style,
-    layout=layout,
-    disabled=True  # Disabled until CSV is loaded
-)
-
-# Label selector widget
-label_selector = widgets.Dropdown(
-    options=[],  # To be populated with label column names after loading CSV
-    description="Select Label Column:",
-    style=style,
-    layout=layout,
-    disabled=True  # Disabled until CSV is loaded
-)
-
-# Positive label value input
-positive_label_input = widgets.Text(
-    value='',
-    description='Positive Label Value:',
-    style=style,
-    layout=layout,
-    placeholder='Enter the label value for positive samples',
-    disabled=True  # Disabled until columns are selected
-)
-
-# Button to trigger the regex tool
-run_button = widgets.Button(
-    description="Run Regex Generator",
-    layout=button_layout,
-    button_style='success',
-    disabled=True  # Disabled until all inputs are provided
-)
-
-# Output area for displaying messages
-output = widgets.Output()
-
-# Display the widgets in a vertical box
-display(widgets.VBox([
-    widgets.HTML("<h2>Regex Pattern Generator</h2>"),
-    file_upload,
-    load_button,
-    column_selector,
-    label_selector,
-    positive_label_input,
-    run_button,
-    output
-]))
-
-# Function to enable the load button when a file is uploaded
-def on_file_upload_change(change):
-    if file_upload.value:
-        load_button.disabled = False
-    else:
-        load_button.disabled = True
-
-file_upload.observe(on_file_upload_change, names='value')
-
-# Function to load CSV from uploaded file
-def load_csv(b):
-    global df
-    with output:
-        output.clear_output()
-        if not file_upload.value:
-            display(Markdown("**Please upload a CSV file.**"))
-            return
-        try:
-            uploaded_file = list(file_upload.value.values())[0]
-            content = uploaded_file['content']
-            df = pd.read_csv(pd.io.common.BytesIO(content))
-            display(Markdown("**CSV file content preview:**"))
-            display(df.head())  # Show a preview of the DataFrame
-
-            # Populate the column selectors with the DataFrame's columns
-            column_selector.options = df.columns.tolist()
-            label_selector.options = df.columns.tolist()
-
-            # Enable the column selectors
-            column_selector.disabled = False
-            label_selector.disabled = False
-
-            display(Markdown("**CSV file loaded successfully.**"))
-            display(Markdown("**Please select the data and label columns from the dropdowns.**"))
-        except Exception as e:
-            display(Markdown(f"**Error loading CSV file:** `{str(e)}`"))
-
-# Attach the function to the load button
-load_button.on_click(load_csv)
-
-# Enable the positive label input when columns are selected
-def on_columns_selected(change):
-    if column_selector.value and label_selector.value:
-        positive_label_input.disabled = False
-    else:
-        positive_label_input.disabled = True
-    enable_run_button(None)
-
-column_selector.observe(on_columns_selected, names='value')
-label_selector.observe(on_columns_selected, names='value')
-
-# Enable the run button when all inputs are provided
-def enable_run_button(change):
-    if column_selector.value and label_selector.value and positive_label_input.value.strip():
-        run_button.disabled = False
-    else:
-        run_button.disabled = True
-
-positive_label_input.observe(enable_run_button, names='value')
-
-# Genetic Algorithm for Regex Generation
-class RegexGeneticAlgorithm:
-    def __init__(self, positive_samples, negative_samples, population_size=50, generations=50,
-                 crossover_rate=0.7, mutation_rate=0.1, elitism_count=2):
+    This class evolves regex patterns to match positive samples
+    while avoiding negative samples.
+    """
+    def __init__(self, positive_samples, negative_samples, population_size=100, generations=100,
+                 crossover_rate=0.7, mutation_rate=0.1, elitism_count=5):
         self.positive_samples = positive_samples
         self.negative_samples = negative_samples
         self.population_size = population_size
@@ -154,23 +21,35 @@ class RegexGeneticAlgorithm:
         self.mutation_rate = mutation_rate
         self.elitism_count = elitism_count
         self.population = []
-        self.char_set = self.get_char_set()
         self.regex_elements = self.get_regex_elements()
         self.best_pattern = ''
         self.best_fitness = -float('inf')
-
-    def get_char_set(self):
-        # Extract all unique characters from positive samples
-        chars = set(''.join(self.positive_samples))
-        return chars
+        self.fitness_history = []
 
     def get_regex_elements(self):
-        # Define possible regex elements based on the character set
-        elements = []
-        for c in self.char_set:
-            elements.append(re.escape(c))
-        elements.extend(['.', '\d', '\w', '\s'])
-        return elements
+        # Define possible regex elements
+        elements = [
+            '.',        # Any character
+            '\d',       # Digit
+            '\D',       # Non-digit
+            '\w',       # Word character
+            '\W',       # Non-word character
+            '\s',       # Whitespace
+            '\S',       # Non-whitespace
+            '[a-z]',    # Lowercase letters
+            '[A-Z]',    # Uppercase letters
+            '[a-zA-Z]', # All letters
+            '[0-9]',    # Digits 0-9
+            '[^a-zA-Z0-9]', # Special characters
+            # Add more character classes or literals as needed
+        ]
+        # Add escaped literals from positive samples
+        literals = set()
+        for sample in self.positive_samples:
+            for char in sample:
+                literals.add(re.escape(char))
+        elements.extend(literals)
+        return list(elements)
 
     def initialize_population(self):
         # Generate initial population of random regex patterns
@@ -181,12 +60,12 @@ class RegexGeneticAlgorithm:
 
     def fitness(self, pattern):
         try:
-            regex = re.compile('^' + pattern + '$')
+            regex = re.compile(pattern)
         except re.error:
             return -float('inf')  # Invalid regex patterns are least fit
 
-        tp = sum(bool(regex.fullmatch(s)) for s in self.positive_samples)
-        fp = sum(bool(regex.fullmatch(s)) for s in self.negative_samples)
+        tp = sum(bool(regex.search(s)) for s in self.positive_samples)
+        fp = sum(bool(regex.search(s)) for s in self.negative_samples)
 
         tpr = tp / len(self.positive_samples) if self.positive_samples else 0
         fpr = fp / len(self.negative_samples) if self.negative_samples else 0
@@ -204,13 +83,17 @@ class RegexGeneticAlgorithm:
         return fitness_score
 
     def selection(self):
-        # Tournament selection
-        selected = []
-        for _ in range(self.population_size):
-            participants = random.sample(self.population, k=3)
-            participant_fitness = [(p, self.fitness(p)) for p in participants]
-            winner = max(participant_fitness, key=lambda x: x[1])
-            selected.append(winner[0])
+        # Roulette Wheel Selection
+        fitness_scores = [self.fitness(p) for p in self.population]
+        min_fitness = min(fitness_scores)
+        adjusted_fitness = [f - min_fitness + 1 for f in fitness_scores]  # Avoid negative values
+        total_fitness = sum(adjusted_fitness)
+        if total_fitness == 0:
+            # If all fitness scores are equal, select randomly
+            return random.choices(self.population, k=self.population_size)
+        selection_probs = [f / total_fitness for f in adjusted_fitness]
+
+        selected = random.choices(self.population, weights=selection_probs, k=self.population_size)
         return selected
 
     def crossover(self, parent1, parent2):
@@ -229,6 +112,14 @@ class RegexGeneticAlgorithm:
         for i in range(len(pattern_list)):
             if random.random() < self.mutation_rate:
                 pattern_list[i] = random.choice(self.regex_elements)
+        # Randomly insert or delete elements
+        if random.random() < self.mutation_rate:
+            if random.random() < 0.5 and len(pattern_list) > 1:
+                # Delete a random element
+                del pattern_list[random.randint(0, len(pattern_list) - 1)]
+            else:
+                # Insert a random element
+                pattern_list.insert(random.randint(0, len(pattern_list)), random.choice(self.regex_elements))
         return ''.join(pattern_list)
 
     def run(self):
@@ -239,9 +130,11 @@ class RegexGeneticAlgorithm:
             # Evaluate fitness and keep the best patterns (elitism)
             population_fitness = [(p, self.fitness(p)) for p in self.population]
             population_fitness.sort(key=lambda x: x[1], reverse=True)
+            self.fitness_history.append(population_fitness[0][1])
             if population_fitness[0][1] > self.best_fitness:
                 self.best_fitness = population_fitness[0][1]
                 self.best_pattern = population_fitness[0][0]
+
             elites = [p for p, _ in population_fitness[:self.elitism_count]]
             new_population.extend(elites)
 
@@ -257,79 +150,116 @@ class RegexGeneticAlgorithm:
 
             self.population = new_population[:self.population_size]
 
+            # Optional: Print progress
+            print(f"Generation {generation + 1}/{self.generations}, Best Fitness: {self.best_fitness:.4f}", end='\r')
+
         return self.best_pattern
 
-# Function to trigger the regex generator when the button is clicked
-def run_regex_generator(b):
-    with output:
-        output.clear_output()
-        try:
-            if df is not None and column_selector.value and label_selector.value and positive_label_input.value.strip():
-                selected_column = column_selector.value
-                label_column = label_selector.value
-                data_column = df[selected_column].astype(str)
-                labels = df[label_column].astype(str)
+# Function to read CSV file and process data
+def load_data(file_path, data_column_name, label_column_name, positive_label_value):
+    try:
+        df = pd.read_csv(file_path)
+        data_column = df[data_column_name].astype(str)
+        labels = df[label_column_name].astype(str)
+        positive_samples = data_column[labels == positive_label_value].tolist()
+        negative_samples = data_column[labels != positive_label_value].tolist()
 
-                positive_label = positive_label_input.value.strip()
-                positive_samples = data_column[labels == positive_label].tolist()
-                negative_samples = data_column[labels != positive_label].tolist()
+        if not positive_samples:
+            print(f"No positive samples found with label: {positive_label_value}")
+            print("Please ensure your label column contains the correct label value.")
+            unique_labels = labels.unique()
+            print(f"Unique label values found: {unique_labels}")
+            return None, None
 
-                if not positive_samples:
-                    display(Markdown(f"**No positive samples found with label:** `{positive_label}`"))
-                    display(Markdown("**Please ensure your label column contains the correct label value.**"))
-                    unique_labels = labels.unique()
-                    display(Markdown(f"**Unique label values found:** {unique_labels}"))
-                    return
+        return positive_samples, negative_samples
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        return None, None
 
-                ga = RegexGeneticAlgorithm(
-                    positive_samples=positive_samples,
-                    negative_samples=negative_samples,
-                    population_size=100,
-                    generations=100,
-                    crossover_rate=0.7,
-                    mutation_rate=0.1,
-                    elitism_count=5
-                )
+# User inputs
+# Option 1: Using input prompts
+# file_path = input("Enter the path to your CSV file (e.g., data.csv): ").strip()
+# data_column_name = input("Enter the name of your data column: ").strip()
+# label_column_name = input("Enter the name of your label column: ").strip()
+# positive_label_value = input("Enter the label value for positive samples (e.g., 1 or True): ").strip()
 
-                display(Markdown("**Running the regex generator. Please wait...**"))
+# Option 2: Setting variables directly
+file_path = 'data.csv'  # Replace with your file path
+data_column_name = 'Message'  # Replace with your data column name
+label_column_name = 'Label'    # Replace with your label column name
+positive_label_value = '1'     # Replace with your positive label value
 
-                best_pattern = ga.run()
-                regex_pattern = '^' + best_pattern + '$'
+# Load data
+positive_samples, negative_samples = load_data(file_path, data_column_name, label_column_name, positive_label_value)
+if positive_samples is None:
+    print("Data loading failed. Please check your inputs.")
+else:
+    print(f"Positive samples: {len(positive_samples)}")
+    print(f"Negative samples: {len(negative_samples)}")
 
-                # Evaluate final pattern
-                regex = re.compile(regex_pattern)
-                tp = sum(bool(regex.fullmatch(s)) for s in positive_samples)
-                fp = sum(bool(regex.fullmatch(s)) for s in negative_samples)
-                fn = len(positive_samples) - tp
-                tn = len(negative_samples) - fp
+# Initialize and run the genetic algorithm
+ga = EvolutionRegex(
+    positive_samples=positive_samples,
+    negative_samples=negative_samples,
+    population_size=200,
+    generations=200,
+    crossover_rate=0.8,
+    mutation_rate=0.2,
+    elitism_count=10
+)
 
-                tpr = tp / len(positive_samples) if positive_samples else 0
-                fpr = fp / len(negative_samples) if negative_samples else 0
+print("\nRunning the regex generator. Please wait...")
+best_pattern = ga.run()
+regex_pattern = best_pattern
 
-                display(Markdown(f"### **Generated Regex Pattern:**"))
-                display(Markdown(f"`{regex_pattern}`"))
-                display(Markdown(f"**Pattern Length:** {len(regex_pattern)}"))
-                display(Markdown("### **Performance Metrics:**"))
-                display(Markdown(f"- **True Positives (TP):** {tp}"))
-                display(Markdown(f"- **False Positives (FP):** {fp}"))
-                display(Markdown(f"- **True Negatives (TN):** {tn}"))
-                display(Markdown(f"- **False Negatives (FN):** {fn}"))
-                display(Markdown(f"- **True Positive Rate (TPR):** {tpr:.2f}"))
-                display(Markdown(f"- **False Positive Rate (FPR):** {fpr:.2f}"))
+# Evaluate final pattern
+try:
+    regex = re.compile(regex_pattern)
+except re.error as e:
+    print(f"Error compiling the final regex pattern: {e}")
+    regex = None
 
-                # Display matched and unmatched samples
-                display(Markdown("### **Examples of Positive Samples Matched:**"))
-                matched_positives = [s for s in positive_samples if regex.fullmatch(s)]
-                display(matched_positives[:5])
+if regex:
+    tp = sum(bool(regex.search(s)) for s in positive_samples)
+    fp = sum(bool(regex.search(s)) for s in negative_samples)
+    fn = len(positive_samples) - tp
+    tn = len(negative_samples) - fp
 
-                display(Markdown("### **Examples of Negative Samples Matched (False Positives):**"))
-                matched_negatives = [s for s in negative_samples if regex.fullmatch(s)]
-                display(matched_negatives[:5])
+    tpr = tp / len(positive_samples) if positive_samples else 0
+    fpr = fp / len(negative_samples) if negative_samples else 0
 
-            else:
-                display(Markdown("**Please ensure all inputs are provided and valid.**"))
-        except Exception as e:
-            display(Markdown(f"**An error occurred:** `{str(e)}`"))
+    print("\n=== Generated Regex Pattern ===")
+    print(f"{regex_pattern}")
+    print(f"Pattern Length: {len(regex_pattern)}")
 
-# Attach the function to the run button
-run_button.on_click(run_regex_generator)
+    print("\n=== Performance Metrics ===")
+    print(f"True Positives (TP): {tp}")
+    print(f"False Positives (FP): {fp}")
+    print(f"True Negatives (TN): {tn}")
+    print(f"False Negatives (FN): {fn}")
+    print(f"True Positive Rate (TPR): {tpr:.4f}")
+    print(f"False Positive Rate (FPR): {fpr:.4f}")
+
+    # Display matched and unmatched samples
+    matched_positives = [s for s in positive_samples if regex.search(s)]
+    matched_negatives = [s for s in negative_samples if regex.search(s)]
+
+    print("\n=== Examples of Positive Samples Matched ===")
+    for sample in matched_positives[:5]:
+        print(sample)
+
+    if matched_negatives:
+        print("\n=== Examples of Negative Samples Matched (False Positives) ===")
+        for sample in matched_negatives[:5]:
+            print(sample)
+    else:
+        print("\nNo false positives detected.")
+else:
+    print("Failed to compile the regex pattern.")
+
+# Optional: Plot fitness over generations
+plt.plot(ga.fitness_history)
+plt.title('Fitness over Generations')
+plt.xlabel('Generation')
+plt.ylabel('Fitness')
+plt.show()
