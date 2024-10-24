@@ -11,6 +11,7 @@ import base64
 import matplotlib.pyplot as plt
 import seaborn as sns
 import random
+import numpy as np
 
 # Set Seaborn style for better aesthetics
 sns.set(style="whitegrid")
@@ -29,11 +30,11 @@ class RegexIndividual:
         self.fitness = 0
 
     def __str__(self):
-        return f"Regex: {self.pattern}, Fitness: {self.fitness}"
+        return f"Regex: {self.pattern}, Fitness: {self.fitness:.4f}"
 
 def calculate_fitness(individual, data):
     """
-    Calculate the fitness of a regex individual based on coverage and simplicity.
+    Calculate the fitness of a regex individual based on coverage, simplicity, and processing speed.
     
     Args:
         individual (RegexIndividual): The regex individual.
@@ -49,15 +50,21 @@ def calculate_fitness(individual, data):
         processing_time = end_time - start_time
         match_count = matches.sum()
         coverage = match_count / len(data)  # Between 0 and 1
-        simplicity = 1 / len(individual.pattern)  # Shorter patterns are better
-        # Fitness could be a weighted sum; adjust weights as needed
-        fitness = coverage * 0.7 + simplicity * 0.3
+        
+        # Simplicity: fewer characters = simpler
+        simplicity = 1 / (len(individual.pattern) + 1)  # Avoid division by zero
+        
+        # Processing speed: faster is better (inverse of processing time)
+        speed = 1 / (processing_time + 1e-6)  # Avoid division by zero
+        
+        # Multi-objective fitness with weights
+        fitness = (coverage * 0.5) + (simplicity * 0.3) + (speed * 0.2)
     except re.error:
         fitness = 0  # Penalize invalid regex
     return fitness
 
 class GeneticAlgorithm:
-    def __init__(self, data, population_size=50, generations=100, mutation_rate=0.1, crossover_rate=0.7):
+    def __init__(self, data, population_size=30, generations=50, mutation_rate=0.2, crossover_rate=0.7):
         self.data = data
         self.population_size = population_size
         self.generations = generations
@@ -124,9 +131,12 @@ class GeneticAlgorithm:
         Returns:
             RegexIndividual: The offspring.
         """
-        # Simple crossover: take half of parent1's pattern and half of parent2's
-        split1 = len(parent1.pattern) // 2
-        split2 = len(parent2.pattern) // 2
+        # Two-point crossover
+        if len(parent1.pattern) < 2 or len(parent2.pattern) < 2:
+            return RegexIndividual(parent1.pattern)
+        
+        split1 = random.randint(1, len(parent1.pattern)-1)
+        split2 = random.randint(1, len(parent2.pattern)-1)
         child_pattern = parent1.pattern[:split1] + parent2.pattern[split2:]
         return RegexIndividual(child_pattern)
 
@@ -181,12 +191,142 @@ class GeneticAlgorithm:
         return self.best_individual.pattern
 
 # -------------------
+# Enhanced Feature Extraction and Analysis Functions
+# -------------------
+
+def ngram_analysis(column_data, n=3):
+    """
+    Perform n-gram analysis to identify common substrings.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+        n (int): Length of the n-grams.
+    
+    Returns:
+        list: List of common n-grams sorted by frequency.
+    """
+    ngrams = collections.defaultdict(int)
+    for entry in column_data:
+        entry = entry.lower()
+        for i in range(len(entry)-n+1):
+            gram = entry[i:i+n]
+            ngrams[gram] +=1
+    # Filter n-grams that appear more than once
+    common_ngrams = [gram for gram, count in ngrams.items() if count >1]
+    # Sort by frequency descending
+    common_ngrams = sorted(common_ngrams, key=lambda x: ngrams[x], reverse=True)
+    return common_ngrams
+
+def prefix_suffix_identification(column_data):
+    """
+    Identify common prefixes and suffixes in the data.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+    
+    Returns:
+        tuple: (common_prefix, common_suffix)
+    """
+    prefixes = [entry[:i] for entry in column_data for i in range(1, len(entry))]
+    suffixes = [entry[-i:] for entry in column_data for i in range(1, len(entry))]
+    prefix_counts = collections.Counter(prefixes)
+    suffix_counts = collections.Counter(suffixes)
+    common_prefix = prefix_counts.most_common(1)[0][0] if prefix_counts else ''
+    common_suffix = suffix_counts.most_common(1)[0][0] if suffix_counts else ''
+    return common_prefix, common_suffix
+
+def substring_identification(column_data, min_length=2):
+    """
+    Identify common substrings in the data.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+        min_length (int): Minimum length of substrings to consider.
+    
+    Returns:
+        list: List of common substrings sorted by frequency.
+    """
+    substrings = collections.defaultdict(int)
+    for entry in column_data:
+        entry = entry.lower()
+        length = len(entry)
+        for i in range(length):
+            for j in range(i+min_length, length+1):
+                substr = entry[i:j]
+                substrings[substr] +=1
+    # Filter substrings that appear more than once
+    common_substrings = [substr for substr, count in substrings.items() if count >1]
+    # Sort by frequency descending
+    common_substrings = sorted(common_substrings, key=lambda x: substrings[x], reverse=True)
+    return common_substrings
+
+def cluster_similar_entries(column_data, threshold=0.8):
+    """
+    Cluster similar entries based on Levenshtein similarity.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+        threshold (float): Similarity threshold for clustering.
+    
+    Returns:
+        list: List of clusters, each cluster is a list of similar entries.
+    """
+    entries = column_data.unique().tolist()
+    clusters = []
+    for entry in entries:
+        found_cluster = False
+        for cluster in clusters:
+            if any(Levenshtein.ratio(entry.lower(), existing.lower()) >= threshold for existing in cluster):
+                cluster.append(entry)
+                found_cluster = True
+                break
+        if not found_cluster:
+            clusters.append([entry])
+    return clusters
+
+# -------------------
+# Robust Error Handling and Validation Functions
+# -------------------
+
+def validate_regex(pattern):
+    """
+    Validate the regex pattern.
+    
+    Args:
+        pattern (str): The regex pattern.
+    
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    try:
+        re.compile(pattern)
+        return True
+    except re.error:
+        return False
+
+def validate_data(df):
+    """
+    Validate the uploaded DataFrame.
+    
+    Args:
+        df (pd.DataFrame): The DataFrame to validate.
+    
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    if df.empty:
+        return False
+    if not all(df.columns):
+        return False
+    return True
+
+# -------------------
 # Helper Functions
 # -------------------
 
 def generate_regex_pattern(column_data):
     """
-    Generate an optimized, case-insensitive regex pattern with word boundaries.
+    Generate an optimized, case-insensitive regex pattern with word boundaries and quantifiers.
     
     Args:
         column_data (pd.Series): Data from the selected column.
@@ -272,6 +412,8 @@ def explain_regex(pattern):
         explanation.append("Uses alternation to match one of the specified patterns.")
     if "\\b" in pattern:
         explanation.append("Uses word boundaries for precise matching.")
+    if "*" in pattern or "+" in pattern or "?" in pattern:
+        explanation.append("Uses quantifiers to handle variations.")
     return "\n".join(explanation) if explanation else "No specific patterns detected."
 
 def visualize_matches(pattern, data):
@@ -315,6 +457,272 @@ def levenshtein_approximate_match(unmatched_data, pattern, threshold=0.8):
             unmatched.append(value)
     return matched, unmatched
 
+def cluster_similar_entries(column_data, threshold=0.8):
+    """
+    Cluster similar entries based on Levenshtein similarity.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+        threshold (float): Similarity threshold for clustering.
+    
+    Returns:
+        list: List of clusters, each cluster is a list of similar entries.
+    """
+    entries = column_data.unique().tolist()
+    clusters = []
+    for entry in entries:
+        found_cluster = False
+        for cluster in clusters:
+            if any(Levenshtein.ratio(entry.lower(), existing.lower()) >= threshold for existing in cluster):
+                cluster.append(entry)
+                found_cluster = True
+                break
+        if not found_cluster:
+            clusters.append([entry])
+    return clusters
+
+# -------------------
+# Helper Functions for Feature Extraction
+# -------------------
+
+def perform_feature_extraction(column_data):
+    """
+    Perform feature extraction including n-gram analysis, prefix/suffix identification, and substring identification.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+    
+    Returns:
+        dict: Extracted features.
+    """
+    features = {}
+    features['common_ngrams'] = ngram_analysis(column_data, n=3)
+    features['common_prefix'], features['common_suffix'] = prefix_suffix_identification(column_data)
+    features['common_substrings'] = substring_identification(column_data, min_length=2)
+    features['clusters'] = cluster_similar_entries(column_data, threshold=0.8)
+    return features
+
+def ngram_analysis(column_data, n=3):
+    """
+    Perform n-gram analysis to identify common substrings.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+        n (int): Length of the n-grams.
+    
+    Returns:
+        list: List of common n-grams sorted by frequency.
+    """
+    ngrams = collections.defaultdict(int)
+    for entry in column_data:
+        entry = entry.lower()
+        for i in range(len(entry)-n+1):
+            gram = entry[i:i+n]
+            ngrams[gram] +=1
+    # Filter n-grams that appear more than once
+    common_ngrams = [gram for gram, count in ngrams.items() if count >1]
+    # Sort by frequency descending
+    common_ngrams = sorted(common_ngrams, key=lambda x: ngrams[x], reverse=True)
+    return common_ngrams
+
+def prefix_suffix_identification(column_data):
+    """
+    Identify common prefixes and suffixes in the data.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+    
+    Returns:
+        tuple: (common_prefix, common_suffix)
+    """
+    prefixes = [entry[:i] for entry in column_data for i in range(1, len(entry))]
+    suffixes = [entry[-i:] for entry in column_data for i in range(1, len(entry))]
+    prefix_counts = collections.Counter(prefixes)
+    suffix_counts = collections.Counter(suffixes)
+    common_prefix = prefix_counts.most_common(1)[0][0] if prefix_counts else ''
+    common_suffix = suffix_counts.most_common(1)[0][0] if suffix_counts else ''
+    return common_prefix, common_suffix
+
+def substring_identification(column_data, min_length=2):
+    """
+    Identify common substrings in the data.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+        min_length (int): Minimum length of substrings to consider.
+    
+    Returns:
+        list: List of common substrings sorted by frequency.
+    """
+    substrings = collections.defaultdict(int)
+    for entry in column_data:
+        entry = entry.lower()
+        length = len(entry)
+        for i in range(length):
+            for j in range(i+min_length, length+1):
+                substr = entry[i:j]
+                substrings[substr] +=1
+    # Filter substrings that appear more than once
+    common_substrings = [substr for substr, count in substrings.items() if count >1]
+    # Sort by frequency descending
+    common_substrings = sorted(common_substrings, key=lambda x: substrings[x], reverse=True)
+    return common_substrings
+
+def cluster_similar_entries(column_data, threshold=0.8):
+    """
+    Cluster similar entries based on Levenshtein similarity.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+        threshold (float): Similarity threshold for clustering.
+    
+    Returns:
+        list: List of clusters, each cluster is a list of similar entries.
+    """
+    entries = column_data.unique().tolist()
+    clusters = []
+    for entry in entries:
+        found_cluster = False
+        for cluster in clusters:
+            if any(Levenshtein.ratio(entry.lower(), existing.lower()) >= threshold for existing in cluster):
+                cluster.append(entry)
+                found_cluster = True
+                break
+        if not found_cluster:
+            clusters.append([entry])
+    return clusters
+
+# -------------------
+# Robust Error Handling and Validation Functions
+# -------------------
+
+def validate_regex(pattern):
+    """
+    Validate the regex pattern.
+    
+    Args:
+        pattern (str): The regex pattern.
+    
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    try:
+        re.compile(pattern)
+        return True
+    except re.error:
+        return False
+
+def validate_data(df):
+    """
+    Validate the uploaded DataFrame.
+    
+    Args:
+        df (pd.DataFrame): The DataFrame to validate.
+    
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    if df.empty:
+        return False
+    if not all(df.columns):
+        return False
+    return True
+
+# -------------------
+# Interactive Widgets Setup
+# -------------------
+
+# Create an upload button
+upload_button = widgets.FileUpload(
+    accept='.csv',  # Accept CSV files
+    multiple=False  # Single file upload
+)
+
+# Create a dropdown for column selection (initially disabled)
+column_dropdown = widgets.Dropdown(
+    options=[],  # To be populated with column names after upload
+    description='Select Column:',
+    style={'description_width': 'initial'},
+    layout=widgets.Layout(width='50%'),
+    disabled=True  # Disabled until CSV is loaded
+)
+
+# Create a button to run the regex tool
+run_button = widgets.Button(
+    description="Run Regex Tool",
+    button_style='primary',
+    layout=widgets.Layout(width='20%'),
+    disabled=True  # Disabled until a column is selected
+)
+
+# Output area for displaying messages and results
+output = widgets.Output()
+
+# Display the upload button, column selector, and run button
+display(HTML("<h2>Upload Your CSV File</h2>"))
+display(upload_button)
+display(column_dropdown)
+display(run_button)
+display(output)
+
+# -------------------
+# Event Handlers
+# -------------------
+
+def handle_upload(change):
+    with output:
+        output.clear_output()  # Clear previous outputs
+        if upload_button.value:
+            try:
+                uploaded_file = list(upload_button.value.values())[0]
+                content = uploaded_file['content'].decode('utf-8')
+                
+                # Read the CSV into a pandas DataFrame
+                df = pd.read_csv(io.StringIO(content))
+                
+                if not validate_data(df):
+                    print("Uploaded CSV file is invalid or empty.")
+                    return
+                
+                print("**CSV File Loaded Successfully!**")
+                print("**Data Preview (First 5 Rows):**")
+                display(df.head())
+                
+                # Populate the column selector with column names
+                column_dropdown.options = df.columns.tolist()
+                column_dropdown.disabled = False  # Enable the column selector
+                run_button.disabled = True  # Disable the run button until a column is selected
+                print("Please select a column from the dropdown to generate a regex pattern.")
+                
+                # Store the DataFrame in the upload_button metadata for later use
+                upload_button.metadata = {'dataframe': df}
+                
+            except Exception as e:
+                print(f"Error loading CSV file: {str(e)}")
+
+def handle_column_selection(change):
+    if column_dropdown.value:
+        run_button.disabled = False  # Enable the run button when a column is selected
+        print(f"**Selected Column:** {column_dropdown.value}")
+    else:
+        run_button.disabled = True
+
+def run_regex_tool_handler(b):
+    with output:
+        output.clear_output()
+        if hasattr(upload_button, 'metadata') and 'dataframe' in upload_button.metadata and column_dropdown.value:
+            df = upload_button.metadata['dataframe']
+            selected_column = column_dropdown.value
+            initial_pattern = r'\d{3}'  # Default initial pattern; you can modify or make it dynamic
+            regex_tool(df, selected_column, initial_pattern)
+        else:
+            print("Please upload a CSV file and select a column first.")
+
+# Attach the handlers to the widgets
+upload_button.observe(handle_upload, names='value')
+column_dropdown.observe(handle_column_selection, names='value')
+run_button.on_click(run_regex_tool_handler)
+
 # -------------------
 # Main Regex Tool Function
 # -------------------
@@ -333,17 +741,31 @@ def regex_tool(data, column_name, initial_pattern, threshold=0.8):
     
     print(f"### Generating optimized regex for column: **{column_name}**")
     
-    # Generate optimized regex based on common patterns
+    # Perform feature extraction
+    features = perform_feature_extraction(column_data)
+    
+    # Generate initial optimized regex based on features
     optimized_pattern = generate_regex_pattern(column_data)
     print(f"**Optimized Pattern Suggestion:** `{optimized_pattern}`")
     
-    # Initialize the Genetic Algorithm
-    ga = GeneticAlgorithm(column_data)
+    # Initialize the Genetic Algorithm with enhanced features
+    ga = GeneticAlgorithm(
+        data=column_data,
+        population_size=30,
+        generations=50,
+        mutation_rate=0.2,
+        crossover_rate=0.7
+    )
     # Initialize population with the optimized pattern
     ga.initialize_population(initial_patterns=[optimized_pattern])
     # Run the genetic algorithm
     best_pattern = ga.run()
-    print(f"**Best Regex Pattern from Genetic Algorithm:** `{best_pattern}`")
+    print(f"\n**Best Regex Pattern from Genetic Algorithm:** `{best_pattern}`")
+    
+    # Validate the best regex pattern
+    if not validate_regex(best_pattern):
+        print("\n**Error:** The generated regex pattern is invalid.")
+        return
     
     # Measure performance of the best pattern
     performance_metrics = measure_regex_performance(best_pattern, column_data)
@@ -364,8 +786,8 @@ def regex_tool(data, column_name, initial_pattern, threshold=0.8):
     print("\n**Visualizing Regex Match Distribution:**")
     visualize_matches(best_pattern, column_data)
     
-    # Provide a download button for the regex
-    print("\n**Download the Generated Regex:**")
+    # Provide a copy to clipboard button for the regex
+    print("\n**Copy the Generated Regex:**")
     regex_textarea = widgets.Textarea(
         value=best_pattern,
         placeholder='Generated regex',
@@ -375,22 +797,32 @@ def regex_tool(data, column_name, initial_pattern, threshold=0.8):
     )
     display(regex_textarea)
     
-    download_button = widgets.Button(
-        description="Download Regex",
+    copy_button = widgets.Button(
+        description="Copy Regex",
         button_style='success',
-        tooltip='Download the generated regex',
-        icon='download'
+        tooltip='Copy the generated regex to clipboard',
+        icon='clipboard'
     )
     
-    def on_download_clicked(b):
-        # Encode the regex to bytes
-        regex_bytes = best_pattern.encode('utf-8')
-        b64 = base64.b64encode(regex_bytes).decode()
-        href = f'<a href="data:text/plain;base64,{b64}" download="generated_regex.txt">Click here to download the regex</a>'
-        display(HTML(href))
+    def on_copy_clicked(b):
+        # JavaScript code to copy the regex from the textarea
+        js_code = f"""
+        <script>
+        function copyToClipboard() {{
+            var copyText = document.querySelector('textarea').value;
+            navigator.clipboard.writeText(copyText).then(function() {{
+                alert('Regex copied to clipboard!');
+            }}, function(err) {{
+                alert('Could not copy text: ', err);
+            }});
+        }}
+        copyToClipboard();
+        </script>
+        """
+        display(HTML(js_code))
     
-    download_button.on_click(on_download_clicked)
-    display(download_button)
+    copy_button.on_click(on_copy_clicked)
+    display(copy_button)
     
     # Provide a testing interface
     print("\n**Test the Generated Regex:**")
@@ -446,6 +878,43 @@ def regex_tool(data, column_name, initial_pattern, threshold=0.8):
         pattern_history = []
     pattern_history.append(best_pattern)
     
+    if pattern_history:
+        print("\n**Pattern History:**")
+        for idx, pattern in enumerate(pattern_history, 1):
+            print(f"{idx}. `{pattern}`")
+
+# -------------------
+# Additional Enhancements
+# -------------------
+
+def perform_feature_extraction(column_data):
+    """
+    Perform feature extraction including n-gram analysis, prefix/suffix identification, and substring identification.
+    
+    Args:
+        column_data (pd.Series): Data from the selected column.
+    
+    Returns:
+        dict: Extracted features.
+    """
+    features = {}
+    features['common_ngrams'] = ngram_analysis(column_data, n=3)
+    features['common_prefix'], features['common_suffix'] = prefix_suffix_identification(column_data)
+    features['common_substrings'] = substring_identification(column_data, min_length=2)
+    features['clusters'] = cluster_similar_entries(column_data, threshold=0.8)
+    return features
+
+# -------------------
+# Display Widgets and Initialize Variables
+# -------------------
+
+# Initialize pattern history
+if 'pattern_history' not in globals():
+    pattern_history = []
+
+# -------------------
+# End of Notebook Code
+# -------------------
     if pattern_history:
         print("\n**Pattern History:**")
         for idx, pattern in enumerate(pattern_history, 1):
