@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 from IPython.display import display, Markdown
 import ipywidgets as widgets
-from ipyfilechooser import FileChooser
 
 # Placeholder for the DataFrame
 df = None
@@ -15,18 +14,21 @@ style = {'description_width': 'initial'}
 layout = widgets.Layout(width='50%')
 button_layout = widgets.Layout(width='20%')
 
-# File chooser widget
-file_chooser = FileChooser(
-    use_dir_icons=True,
-    filter_pattern=['*.csv', '*.xlsx'],
-    show_only_dirs=False
+# File upload widget
+file_upload = widgets.FileUpload(
+    accept='.csv',  # Accepts CSV files
+    multiple=False,
+    description='Upload CSV File',
+    style=style,
+    layout=layout
 )
 
 # Button to load CSV
 load_button = widgets.Button(
-    description="Load Data File",
+    description="Load CSV",
     layout=button_layout,
-    button_style='primary'
+    button_style='primary',
+    disabled=True  # Initially disabled until a file is uploaded
 )
 
 # Column selector widget
@@ -53,7 +55,8 @@ positive_label_input = widgets.Text(
     description='Positive Label Value:',
     style=style,
     layout=layout,
-    placeholder='Enter the label value for positive samples'
+    placeholder='Enter the label value for positive samples',
+    disabled=True  # Disabled until columns are selected
 )
 
 # Button to trigger the regex tool
@@ -61,7 +64,7 @@ run_button = widgets.Button(
     description="Run Regex Generator",
     layout=button_layout,
     button_style='success',
-    disabled=True  # Disabled until columns are selected
+    disabled=True  # Disabled until all inputs are provided
 )
 
 # Output area for displaying messages
@@ -70,7 +73,7 @@ output = widgets.Output()
 # Display the widgets in a vertical box
 display(widgets.VBox([
     widgets.HTML("<h2>Regex Pattern Generator</h2>"),
-    file_chooser,
+    file_upload,
     load_button,
     column_selector,
     label_selector,
@@ -79,49 +82,64 @@ display(widgets.VBox([
     output
 ]))
 
-# Function to load data from selected file
+# Function to enable the load button when a file is uploaded
+def on_file_upload_change(change):
+    if file_upload.value:
+        load_button.disabled = False
+    else:
+        load_button.disabled = True
+
+file_upload.observe(on_file_upload_change, names='value')
+
+# Function to load CSV from uploaded file
 def load_csv(b):
     global df
     with output:
         output.clear_output()
-        file_path = file_chooser.selected
-        if not file_path:
-            display(Markdown("**Please select a data file (.csv or .xlsx).**"))
+        if not file_upload.value:
+            display(Markdown("**Please upload a CSV file.**"))
             return
         try:
-            display(Markdown(f"**Loading data file from:** `{file_path}`"))
-            if file_path.endswith('.csv'):
-                df = pd.read_csv(file_path)
-            elif file_path.endswith('.xlsx'):
-                df = pd.read_excel(file_path)
-            else:
-                display(Markdown("**Unsupported file format. Please select a .csv or .xlsx file.**"))
-                return
-            display(Markdown("**Data file content preview:**"))
+            uploaded_file = list(file_upload.value.values())[0]
+            content = uploaded_file['content']
+            df = pd.read_csv(pd.io.common.BytesIO(content))
+            display(Markdown("**CSV file content preview:**"))
             display(df.head())  # Show a preview of the DataFrame
+
             # Populate the column selectors with the DataFrame's columns
             column_selector.options = df.columns.tolist()
-            column_selector.disabled = False  # Enable the column selector
             label_selector.options = df.columns.tolist()
-            label_selector.disabled = False  # Enable the label selector
-            run_button.disabled = True  # Ensure run button is disabled until all inputs are provided
-            display(Markdown("**Data file loaded successfully.**"))
-            display(Markdown("**Please select the data and label columns from the dropdowns, and provide the positive label value.**"))
+
+            # Enable the column selectors
+            column_selector.disabled = False
+            label_selector.disabled = False
+
+            display(Markdown("**CSV file loaded successfully.**"))
+            display(Markdown("**Please select the data and label columns from the dropdowns.**"))
         except Exception as e:
-            display(Markdown(f"**Error loading data file:** `{str(e)}`"))
+            display(Markdown(f"**Error loading CSV file:** `{str(e)}`"))
 
 # Attach the function to the load button
 load_button.on_click(load_csv)
 
-# Enable the run button when columns are selected and positive label value is provided
+# Enable the positive label input when columns are selected
+def on_columns_selected(change):
+    if column_selector.value and label_selector.value:
+        positive_label_input.disabled = False
+    else:
+        positive_label_input.disabled = True
+    enable_run_button(None)
+
+column_selector.observe(on_columns_selected, names='value')
+label_selector.observe(on_columns_selected, names='value')
+
+# Enable the run button when all inputs are provided
 def enable_run_button(change):
     if column_selector.value and label_selector.value and positive_label_input.value.strip():
         run_button.disabled = False
     else:
         run_button.disabled = True
 
-column_selector.observe(enable_run_button, names='value')
-label_selector.observe(enable_run_button, names='value')
 positive_label_input.observe(enable_run_button, names='value')
 
 # Genetic Algorithm for Regex Generation
@@ -167,8 +185,8 @@ class RegexGeneticAlgorithm:
         except re.error:
             return -float('inf')  # Invalid regex patterns are least fit
 
-        tp = sum(bool(regex.match(s)) for s in self.positive_samples)
-        fp = sum(bool(regex.match(s)) for s in self.negative_samples)
+        tp = sum(bool(regex.fullmatch(s)) for s in self.positive_samples)
+        fp = sum(bool(regex.fullmatch(s)) for s in self.negative_samples)
 
         tpr = tp / len(self.positive_samples) if self.positive_samples else 0
         fpr = fp / len(self.negative_samples) if self.negative_samples else 0
@@ -280,8 +298,8 @@ def run_regex_generator(b):
 
                 # Evaluate final pattern
                 regex = re.compile(regex_pattern)
-                tp = sum(bool(regex.match(s)) for s in positive_samples)
-                fp = sum(bool(regex.match(s)) for s in negative_samples)
+                tp = sum(bool(regex.fullmatch(s)) for s in positive_samples)
+                fp = sum(bool(regex.fullmatch(s)) for s in negative_samples)
                 fn = len(positive_samples) - tp
                 tn = len(negative_samples) - fp
 
@@ -301,15 +319,15 @@ def run_regex_generator(b):
 
                 # Display matched and unmatched samples
                 display(Markdown("### **Examples of Positive Samples Matched:**"))
-                matched_positives = [s for s in positive_samples if regex.match(s)]
+                matched_positives = [s for s in positive_samples if regex.fullmatch(s)]
                 display(matched_positives[:5])
 
                 display(Markdown("### **Examples of Negative Samples Matched (False Positives):**"))
-                matched_negatives = [s for s in negative_samples if regex.match(s)]
+                matched_negatives = [s for s in negative_samples if regex.fullmatch(s)]
                 display(matched_negatives[:5])
 
             else:
-                display(Markdown("**Please load a valid data file, select the data and label columns, and provide the positive label value.**"))
+                display(Markdown("**Please ensure all inputs are provided and valid.**"))
         except Exception as e:
             display(Markdown(f"**An error occurred:** `{str(e)}`"))
 
