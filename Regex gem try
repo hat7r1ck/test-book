@@ -207,4 +207,106 @@ def ngram_analysis(column_data, n=3):
     Returns:
         list: List of common n-grams sorted by frequency.
     """
-    ng
+    ngrams = collections.Counter()
+    for text in column_data:
+        for i in range(len(text) - n + 1):
+            ngram = text[i:i+n]
+            ngrams[ngram] += 1
+    return ngrams.most_common(10)  # Return top 10 most frequent n-grams
+
+# -------------------
+# Interactive Widgets and Main Function
+# -------------------
+
+def upload_csv_file():
+    """
+    Upload a CSV file using a file upload widget.
+    """
+    upload = widgets.FileUpload(
+        accept=".csv",
+        description="Upload CSV File"
+    )
+    return upload
+
+def select_column(data):
+    """
+    Create a dropdown widget to select a column from the uploaded CSV data.
+    """
+    if data is not None:
+        column_options = list(data.columns)
+        dropdown = widgets.Dropdown(
+            options=column_options,
+            description="Select Column"
+        )
+        return dropdown
+    else:
+        return None
+
+def run_regex_tool(data, column_name, upload_widget):
+    """
+    Run the regex generation and evaluation process.
+
+    Args:
+        data (pd.DataFrame): Data from the uploaded CSV file.
+        column_name (str): Name of the selected column.
+        upload_widget (widgets.FileUpload): File upload widget for potential re-upload.
+    """
+    if data is not None and column_name is not None:
+        selected_column = data[column_name]
+        # Feature extraction (e.g., n-gram analysis)
+        top_ngrams = ngram_analysis(selected_column, n=3)
+
+        # Initialize and run the genetic algorithm
+        ga = GeneticAlgorithm(selected_column)
+        # Optionally, provide initial patterns based on feature extraction
+        # initial_patterns = [ngram for ngram, _ in top_ngrams]
+        # ga.initialize_population(initial_patterns)
+        best_regex = ga.run()
+
+        # Evaluate the best regex pattern
+        matches = selected_column.str.contains(best_regex, regex=True, case=False, na=False)
+        match_count = matches.sum()
+        coverage = match_count / len(selected_column)
+
+        # Display results
+        display(Markdown(f"**Best Regex Pattern:** {best_regex}"))
+        display(Markdown(f"**Coverage:** {coverage:.4f}"))
+        display(Markdown(f"**Top 3-grams:**"))
+        for ngram, count in top_ngrams:
+            display(Markdown(f"- {ngram} ({count})"))
+    else:
+        display(Markdown("Please upload a CSV file and select a column."))
+
+def main():
+    """
+    Main function to display interactive widgets and run the regex tool.
+    """
+    upload_widget = upload_csv_file()
+    column_dropdown = None
+    data = None
+
+    def on_upload(change):
+        global data, column_dropdown
+        try:
+            uploaded_file = change['new']
+            if uploaded_file is None:
+                return
+            data = pd.read_csv(io.BytesIO(uploaded_file['content']))
+            column_dropdown = select_column(data)
+            display(column_dropdown)
+        except Exception as e:
+            print(f"Error uploading file: {e}")
+
+    upload_widget.observe(on_upload, names='value')
+
+    run_button = widgets.Button(description="Run Regex Tool")
+    def on_run_button_click(b):
+        run_regex_tool(data, column_dropdown.value if column_dropdown is not None else None, upload_widget)
+
+    run_button.on_click(on_run_button_click)
+
+    display(upload_widget)
+    display(run_button)
+
+if __name__ == "__main__":
+    main()
