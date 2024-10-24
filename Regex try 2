@@ -4,7 +4,7 @@ import pandas as pd
 from IPython.display import display, Markdown, HTML
 import ipywidgets as widgets
 from ipyfilechooser import FileChooser
-import itertools
+from itertools import zip_longest
 
 # Placeholder for the DataFrame
 df = None
@@ -146,51 +146,78 @@ def handle_column_selection(change):
 # Attach the column selection observer
 column_selector.observe(handle_column_selection, names='value')
 
-# Function to generate regex pattern from data
+# Improved function to generate regex pattern from data
 def generate_regex_pattern(strings):
     import re
+    from itertools import zip_longest
+
+    # Remove empty strings
+    strings = [s for s in strings if s]
     if not strings:
         return '.*'
 
-    # Split each string into characters
-    split_strings = [list(s) for s in strings]
-    # Transpose the list to group characters by position
-    transposed = list(itertools.zip_longest(*split_strings, fillvalue=None))
+    # Find the maximum length of the strings
+    max_length = max(len(s) for s in strings)
+
+    # Pad strings to the maximum length
+    padded_strings = [s.ljust(max_length, '\0') for s in strings]
 
     pattern = ''
     i = 0
-    while i < len(transposed):
-        chars = transposed[i]
-        chars_set = set(chars)
-        chars_set.discard(None)
-        if len(chars_set) == 1:
+    while i < max_length:
+        # Collect the characters at this position
+        chars_at_pos = [s[i] for s in padded_strings]
+        # Remove padding character
+        non_padding_chars = [c for c in chars_at_pos if c != '\0']
+        unique_chars = set(non_padding_chars)
+
+        if len(unique_chars) == 1:
             # All characters are the same at this position
-            char = chars_set.pop()
-            pattern += re.escape(char)
+            c = unique_chars.pop()
+            pattern += re.escape(c)
             i += 1
         else:
-            # Start of a variable segment
-            j = i
-            while j < len(transposed):
-                chars = transposed[j]
-                chars_set = set(chars)
-                chars_set.discard(None)
-                if len(chars_set) == 1:
+            # Variable segment
+            start = i
+            # Determine character types
+            var_char_types = []
+            while i < max_length:
+                chars_at_pos = [s[i] if i < len(s) else '\0' for s in padded_strings]
+                non_padding_chars = [c for c in chars_at_pos if c != '\0']
+                unique_chars = set(non_padding_chars)
+                if len(unique_chars) == 1:
+                    # Same character, end of variable segment
                     break
-                j += 1
-            # Variable segment from position i to j
-            variable_chars = transposed[i:j]
-            # Determine character class
-            var_char_sets = [set(filter(None, chars)) for chars in variable_chars]
-            if all(all(c.isdigit() for c in chars) for chars in var_char_sets):
-                pattern += r'\d{' + str(j - i) + '}'
-            elif all(all(c.isalpha() for c in chars) for chars in var_char_sets):
-                pattern += r'[a-zA-Z]{' + str(j - i) + '}'
-            elif all(all(c.isalnum() for c in chars) for chars in var_char_sets):
-                pattern += r'\w{' + str(j - i) + '}'
+                # Determine character types at this position
+                types_at_pos = set()
+                for c in unique_chars:
+                    if c.isdigit():
+                        types_at_pos.add('digit')
+                    elif c.isalpha():
+                        types_at_pos.add('alpha')
+                    elif c.isalnum():
+                        types_at_pos.add('alnum')
+                    else:
+                        types_at_pos.add('other')
+                var_char_types.extend(types_at_pos)
+                i += 1
+            # Determine the character class for the variable segment
+            if all(t == 'digit' for t in var_char_types):
+                char_class = r'\d'
+            elif all(t == 'alpha' for t in var_char_types):
+                char_class = r'[a-zA-Z]'
+            elif all(t in ['alpha', 'digit', 'alnum'] for t in var_char_types):
+                char_class = r'\w'
             else:
-                pattern += r'.{' + str(j - i) + '}'
-            i = j
+                char_class = r'.'
+            # Variable segment lengths
+            segment_lengths = [len(s[start:i]) for s in strings]
+            min_seg_len = min(segment_lengths)
+            max_seg_len = max(segment_lengths)
+            if min_seg_len == max_seg_len:
+                pattern += f'{char_class}{{{min_seg_len}}}'
+            else:
+                pattern += f'{char_class}{{{min_seg_len},{max_seg_len}}}'
     pattern = '^' + pattern + '$'
     return pattern
 
