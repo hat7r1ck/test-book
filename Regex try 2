@@ -1,19 +1,19 @@
 # Import necessary libraries
 import re
+import random
+import numpy as np
 import pandas as pd
-from IPython.display import display, Markdown, HTML
+from IPython.display import display, Markdown
 import ipywidgets as widgets
 from ipyfilechooser import FileChooser
-from itertools import zip_longest
 
 # Placeholder for the DataFrame
 df = None
 
-# Define styles for better visibility
+# UI Components
 style = {'description_width': 'initial'}
 layout = widgets.Layout(width='50%')
 button_layout = widgets.Layout(width='20%')
-button_style = 'primary'
 
 # File chooser widget
 file_chooser = FileChooser(
@@ -26,7 +26,7 @@ file_chooser = FileChooser(
 load_button = widgets.Button(
     description="Load CSV",
     layout=button_layout,
-    button_style=button_style
+    button_style='primary'
 )
 
 # Column selector widget
@@ -38,25 +38,18 @@ column_selector = widgets.Dropdown(
     disabled=True  # Disabled until CSV is loaded
 )
 
-# Regex Library Selector
-regex_library_selector = widgets.Dropdown(
-    options=['-- Select from Library --'],  # Will be populated later
-    description="Regex Library (Optional):",
+# Label selector widget
+label_selector = widgets.Dropdown(
+    options=[],  # To be populated with label column names after loading CSV
+    description="Select Label Column:",
     style=style,
     layout=layout,
-)
-
-# Text input widget for the regex pattern
-regex_input = widgets.Text(
-    value='',
-    description='Custom Regex Pattern (Optional):',
-    style=style,
-    layout=layout,
+    disabled=True  # Disabled until CSV is loaded
 )
 
 # Button to trigger the regex tool
 run_button = widgets.Button(
-    description="Run Regex Tool",
+    description="Run Regex Generator",
     layout=button_layout,
     button_style='success'
 )
@@ -64,40 +57,15 @@ run_button = widgets.Button(
 # Output area for displaying messages
 output = widgets.Output()
 
-# Instructional text
-optional_text = widgets.Label(
-    "Optional: You may provide a custom regex pattern or select one from the library..."
-)
-
 # Display the widgets in a vertical box
 display(widgets.VBox([
     file_chooser,
     load_button,
     column_selector,
-    optional_text,
-    regex_library_selector,
-    regex_input,
+    label_selector,
     run_button,
     output
 ]))
-
-# Feature: Built-in Regex Library (common regex patterns)
-built_in_regex_library = {
-    'Email Address': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
-    # Add more patterns as needed
-}
-
-# Update regex_library_selector options
-regex_library_selector.options = ['-- Select from Library --'] + list(built_in_regex_library.keys())
-
-# Function to update regex_input based on library selection
-def handle_regex_library_selection(change):
-    if regex_library_selector.value != '-- Select from Library --':
-        regex_input.value = built_in_regex_library[regex_library_selector.value]
-    else:
-        regex_input.value = ''
-
-regex_library_selector.observe(handle_regex_library_selection, names='value')
 
 # Function to load CSV from selected file
 def load_csv(b):
@@ -112,218 +80,202 @@ def load_csv(b):
             display(f"Loading CSV file from: {file_path}")
             df = pd.read_csv(file_path)
             display("CSV file content preview:")
-            def display_scrollable_dataframe(df):
-                html = df.to_html()
-                scrollable_div = f'''
-                <div style="overflow-x: auto; max-width: 100%;">
-                    {html}
-                </div>
-                '''
-                display(HTML(scrollable_div))
-
-            display_scrollable_dataframe(df.head())  # Show a preview of the DataFrame
-            # Populate the column selector with the DataFrame's columns
+            display(df.head())  # Show a preview of the DataFrame
+            # Populate the column selectors with the DataFrame's columns
             column_selector.options = df.columns.tolist()
             column_selector.disabled = False  # Enable the column selector
-            run_button.disabled = True  # Disable the run button until a column is selected
-            display("CSV file loaded successfully. Select a column from the dropdown.")
+            label_selector.options = df.columns.tolist()
+            label_selector.disabled = False  # Enable the label selector
+            run_button.disabled = False
+            display("CSV file loaded successfully. Select columns from the dropdowns.")
         except Exception as e:
             display(f"Error loading CSV file: {str(e)}")
 
 # Attach the function to the load button
 load_button.on_click(load_csv)
 
-# Update the button state based on column selection
-def handle_column_selection(change):
-    with output:
-        output.clear_output()
-        if column_selector.value:
-            run_button.disabled = False  # Enable the run button
-            display(f"Column '{column_selector.value}' selected. You can now run the regex tool.")
+# Genetic Algorithm for Regex Generation
+class RegexGeneticAlgorithm:
+    def __init__(self, positive_samples, negative_samples, population_size=50, generations=50,
+                 crossover_rate=0.7, mutation_rate=0.1, elitism_count=2):
+        self.positive_samples = positive_samples
+        self.negative_samples = negative_samples
+        self.population_size = population_size
+        self.generations = generations
+        self.crossover_rate = crossover_rate
+        self.mutation_rate = mutation_rate
+        self.elitism_count = elitism_count
+        self.population = []
+        self.char_set = self.get_char_set()
+        self.regex_elements = self.get_regex_elements()
+        self.best_pattern = ''
+        self.best_fitness = -float('inf')
+
+    def get_char_set(self):
+        # Extract all unique characters from positive samples
+        chars = set(''.join(self.positive_samples))
+        return chars
+
+    def get_regex_elements(self):
+        # Define possible regex elements based on the character set
+        elements = []
+        for c in self.char_set:
+            elements.append(re.escape(c))
+        elements.extend(['.', '\d', '\w', '\s'])
+        return elements
+
+    def initialize_population(self):
+        # Generate initial population of random regex patterns
+        for _ in range(self.population_size):
+            pattern_length = random.randint(3, 10)
+            pattern = ''.join(random.choices(self.regex_elements, k=pattern_length))
+            self.population.append(pattern)
+
+    def fitness(self, pattern):
+        try:
+            regex = re.compile('^' + pattern + '$')
+        except re.error:
+            return -float('inf')  # Invalid regex patterns are least fit
+
+        tp = sum(bool(regex.match(s)) for s in self.positive_samples)
+        fp = sum(bool(regex.match(s)) for s in self.negative_samples)
+
+        tpr = tp / len(self.positive_samples) if self.positive_samples else 0
+        fpr = fp / len(self.negative_samples) if self.negative_samples else 0
+
+        # Fitness function balancing TPR and FPR
+        fitness_score = tpr - fpr
+
+        # Penalize overly general patterns
+        if fpr > 0:
+            fitness_score -= fpr
+
+        # Prefer shorter patterns
+        fitness_score -= len(pattern) * 0.01
+
+        return fitness_score
+
+    def selection(self):
+        # Tournament selection
+        selected = []
+        for _ in range(self.population_size):
+            participants = random.sample(self.population, k=3)
+            participant_fitness = [(p, self.fitness(p)) for p in participants]
+            winner = max(participant_fitness, key=lambda x: x[1])
+            selected.append(winner[0])
+        return selected
+
+    def crossover(self, parent1, parent2):
+        # Single-point crossover
+        if random.random() < self.crossover_rate:
+            point = random.randint(1, min(len(parent1), len(parent2)) - 1)
+            child1 = parent1[:point] + parent2[point:]
+            child2 = parent2[:point] + parent1[point:]
+            return [child1, child2]
         else:
-            run_button.disabled = True
+            return [parent1, parent2]
 
-# Attach the column selection observer
-column_selector.observe(handle_column_selection, names='value')
+    def mutate(self, pattern):
+        # Random mutation
+        pattern_list = list(pattern)
+        for i in range(len(pattern_list)):
+            if random.random() < self.mutation_rate:
+                pattern_list[i] = random.choice(self.regex_elements)
+        return ''.join(pattern_list)
 
-# Improved function to generate regex pattern from data
-def generate_regex_pattern(strings):
-    import re
-    from itertools import zip_longest
+    def run(self):
+        self.initialize_population()
+        for generation in range(self.generations):
+            new_population = []
 
-    # Remove empty strings
-    strings = [s for s in strings if s]
-    if not strings:
-        return '.*'
+            # Evaluate fitness and keep the best patterns (elitism)
+            population_fitness = [(p, self.fitness(p)) for p in self.population]
+            population_fitness.sort(key=lambda x: x[1], reverse=True)
+            if population_fitness[0][1] > self.best_fitness:
+                self.best_fitness = population_fitness[0][1]
+                self.best_pattern = population_fitness[0][0]
+            elites = [p for p, _ in population_fitness[:self.elitism_count]]
+            new_population.extend(elites)
 
-    # Find the maximum length of the strings
-    max_length = max(len(s) for s in strings)
+            # Selection
+            selected = self.selection()
 
-    # Pad strings to the maximum length
-    padded_strings = [s.ljust(max_length, '\0') for s in strings]
+            # Generate new population through crossover and mutation
+            while len(new_population) < self.population_size:
+                parents = random.sample(selected, 2)
+                offspring = self.crossover(parents[0], parents[1])
+                offspring = [self.mutate(child) for child in offspring]
+                new_population.extend(offspring)
 
-    pattern = ''
-    i = 0
-    while i < max_length:
-        # Collect the characters at this position
-        chars_at_pos = [s[i] for s in padded_strings]
-        # Remove padding character
-        non_padding_chars = [c for c in chars_at_pos if c != '\0']
-        unique_chars = set(non_padding_chars)
+            self.population = new_population[:self.population_size]
 
-        if len(unique_chars) == 1:
-            # All characters are the same at this position
-            c = unique_chars.pop()
-            pattern += re.escape(c)
-            i += 1
-        else:
-            # Variable segment
-            start = i
-            # Determine character types
-            var_char_types = []
-            while i < max_length:
-                chars_at_pos = [s[i] if i < len(s) else '\0' for s in padded_strings]
-                non_padding_chars = [c for c in chars_at_pos if c != '\0']
-                unique_chars = set(non_padding_chars)
-                if len(unique_chars) == 1:
-                    # Same character, end of variable segment
-                    break
-                # Determine character types at this position
-                types_at_pos = set()
-                for c in unique_chars:
-                    if c.isdigit():
-                        types_at_pos.add('digit')
-                    elif c.isalpha():
-                        types_at_pos.add('alpha')
-                    elif c.isalnum():
-                        types_at_pos.add('alnum')
-                    else:
-                        types_at_pos.add('other')
-                var_char_types.extend(types_at_pos)
-                i += 1
-            # Determine the character class for the variable segment
-            if all(t == 'digit' for t in var_char_types):
-                char_class = r'\d'
-            elif all(t == 'alpha' for t in var_char_types):
-                char_class = r'[a-zA-Z]'
-            elif all(t in ['alpha', 'digit', 'alnum'] for t in var_char_types):
-                char_class = r'\w'
-            else:
-                char_class = r'.'
-            # Variable segment lengths
-            segment_lengths = [len(s[start:i]) for s in strings]
-            min_seg_len = min(segment_lengths)
-            max_seg_len = max(segment_lengths)
-            if min_seg_len == max_seg_len:
-                pattern += f'{char_class}{{{min_seg_len}}}'
-            else:
-                pattern += f'{char_class}{{{min_seg_len},{max_seg_len}}}'
-    pattern = '^' + pattern + '$'
-    return pattern
+            # Optional: Print progress
+            # print(f"Generation {generation + 1}, Best Fitness: {self.best_fitness}, Best Pattern: {self.best_pattern}")
 
-# Function to explain regex patterns
-def explain_regex(pattern):
-    explanation = []
-    components = [
-        (r'\^', "`^`: Matches the start of the string."),
-        (r'\$', "`$`: Matches the end of the string."),
-        (r'\\d\{\d+\}', r"`\d{n}`: Matches exactly n digits."),
-        (r'\\d\{\d+,\d+\}', r"`\d{n,m}`: Matches between n and m digits."),
-        (r'\\w\{\d+\}', r"`\w{n}`: Matches exactly n word characters."),
-        (r'\\w\{\d+,\d+\}', r"`\w{n,m}`: Matches between n and m word characters."),
-        (r'\[a-zA-Z\]\{\d+\}', r"`[a-zA-Z]{n}`: Matches exactly n letters."),
-        (r'\[a-zA-Z\]\{\d+,\d+\}', r"`[a-zA-Z]{n,m}`: Matches between n and m letters."),
-        (r'\.', "`.`: Matches any character except newline."),
-        (r'\.\{\d+\}', r"`.{n}`: Matches exactly n of any character."),
-        (r'\.\{\d+,\d+\}', r"`.{n,m}`: Matches between n and m of any character."),
-    ]
-    for regex, desc in components:
-        if re.search(regex, pattern):
-            explanation.append(desc)
-    return "\n".join(explanation)
+        return self.best_pattern
 
-# Function to provide feedback
-def provide_feedback(data, pattern):
-    matched = [row for row in data if re.fullmatch(pattern, row)]
-    unmatched = [row for row in data if not re.fullmatch(pattern, row)]
-
-    match_percentage = len(matched) / len(data) * 100 if len(data) > 0 else 0
-    feedback = f"Match Percentage: {match_percentage:.2f}%\n"
-
-    if match_percentage < 80:
-        feedback += "Suggestions:\n"
-        feedback += "- Consider refining the pattern or reviewing unmatched data for inconsistencies.\n"
-
-    return feedback, matched, unmatched
-
-# Interactive buttons for pattern adjustment and copying to clipboard
-def interactive_buttons(optimized_pattern):
-    display(Markdown(f"**Regex Pattern:** `{optimized_pattern}`"))
-    display("Copy the regex pattern manually if needed.")
-
-# Sandbox Feature: Safe environment for testing regex patterns
-def sandbox_environment(pattern, test_data):
-    display(Markdown("**Testing Regex in Sandbox Environment:**"))
-    for value in test_data[:5]:  # Limit output to first 5 entries
-        match = re.fullmatch(pattern, value)
-        if match:
-            display(f"Value: {value} --> Matched: {match.group(0)}")
-        else:
-            display(f"Value: {value} --> No Match")
-
-# Define the main function to integrate all the functionality
-def regex_tool(data, column_name, user_pattern=None, threshold=0.8):
-    column_data = data[column_name].astype(str).tolist()
-
-    # Generate the regex pattern using the improved function
-    auto_generated_pattern = generate_regex_pattern(column_data)
-
-    # Determine which pattern to use
-    if user_pattern:
-        initial_pattern = user_pattern
-        pattern_source = "User-provided pattern"
-    else:
-        initial_pattern = auto_generated_pattern
-        pattern_source = "Automatically generated pattern"
-
-    # Provide feedback based on initial pattern
-    feedback, matched, unmatched = provide_feedback(column_data, initial_pattern)
-
-    # Generate interactive output
-    display(Markdown(f"**{pattern_source}:** `{initial_pattern}`"))
-    display(Markdown(f"**Regex Explanation:**\n{explain_regex(initial_pattern)}"))
-    display(Markdown(f"**Matched Rows:** {len(matched)}"))
-    display(Markdown(f"**Unmatched Rows:** {len(unmatched)}"))
-    display(Markdown(f"**Feedback:**\n{feedback}"))
-
-    # If a user pattern was provided, offer the auto-generated pattern as a suggestion
-    if user_pattern:
-        display(Markdown(f"**Auto-Generated Pattern Suggestion:** `{auto_generated_pattern}`"))
-        display(Markdown(f"**Auto-Generated Pattern Explanation:**\n{explain_regex(auto_generated_pattern)}"))
-        interactive_buttons(auto_generated_pattern)
-    else:
-        interactive_buttons(initial_pattern)
-
-    # Sandbox feature
-    if len(unmatched) > 0:
-        sandbox_environment(initial_pattern, unmatched)
-
-# Function to trigger the regex tool when the button is clicked
-def run_regex_tool(b):
+# Function to trigger the regex generator when the button is clicked
+def run_regex_generator(b):
     with output:
         output.clear_output()
         try:
-            if df is not None and column_selector.value:
+            if df is not None and column_selector.value and label_selector.value:
                 selected_column = column_selector.value
-                column_data = df[selected_column].astype(str)
-                display(f"Running regex tool on column: {selected_column}")
+                label_column = label_selector.value
+                data_column = df[selected_column].astype(str)
+                labels = df[label_column]
 
-                user_pattern = regex_input.value.strip() if regex_input.value.strip() else None
-                regex_tool(df, selected_column, user_pattern)
+                positive_samples = data_column[labels == 1].tolist()
+                negative_samples = data_column[labels == 0].tolist()
+
+                if not positive_samples:
+                    display("No positive samples found. Please ensure your label column contains '1' for desired matches.")
+                    return
+
+                ga = RegexGeneticAlgorithm(
+                    positive_samples=positive_samples,
+                    negative_samples=negative_samples,
+                    population_size=50,
+                    generations=50,
+                    crossover_rate=0.7,
+                    mutation_rate=0.1,
+                    elitism_count=2
+                )
+
+                best_pattern = ga.run()
+                regex_pattern = '^' + best_pattern + '$'
+
+                # Evaluate final pattern
+                regex = re.compile(regex_pattern)
+                tp = sum(bool(regex.match(s)) for s in positive_samples)
+                fp = sum(bool(regex.match(s)) for s in negative_samples)
+                fn = len(positive_samples) - tp
+                tn = len(negative_samples) - fp
+
+                tpr = tp / len(positive_samples) if positive_samples else 0
+                fpr = fp / len(negative_samples) if negative_samples else 0
+
+                display(Markdown(f"**Generated Regex Pattern:** `{regex_pattern}`"))
+                display(Markdown(f"**True Positives:** {tp}"))
+                display(Markdown(f"**False Positives:** {fp}"))
+                display(Markdown(f"**True Negatives:** {tn}"))
+                display(Markdown(f"**False Negatives:** {fn}"))
+                display(Markdown(f"**True Positive Rate (TPR):** {tpr:.2f}"))
+                display(Markdown(f"**False Positive Rate (FPR):** {fpr:.2f}"))
+
+                # Display matched and unmatched samples
+                display(Markdown("**Examples of Positive Samples Matched:**"))
+                matched_positives = [s for s in positive_samples if regex.match(s)]
+                display(matched_positives[:5])
+
+                display(Markdown("**Examples of Negative Samples Matched (False Positives):**"))
+                matched_negatives = [s for s in negative_samples if regex.match(s)]
+                display(matched_negatives[:5])
+
             else:
-                display("Please load a valid CSV file and select a column.")
+                display("Please load a valid CSV file and select the data and label columns.")
         except Exception as e:
             display(f"An error occurred: {str(e)}")
 
 # Attach the function to the run button
-run_button.on_click(run_regex_tool)
+run_button.on_click(run_regex_generator)
